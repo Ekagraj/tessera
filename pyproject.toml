@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tessera"
+version = "0.1.0"
+description = "Event-driven backtesting and strategy research platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "matplotlib",
+    "typer",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+tessera = "tessera.runner.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["tessera*"]
+
+# --- ruff -------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+# --- pytest -----------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# --- mypy -------------------------------------------------------------------
+# Relaxed by default; strict is enforced only on the hot-loop packages that are
+# candidates for a later Rust port: tessera.core and tessera.execution.
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# Global-only flags (harmless everywhere; cannot live in a per-module section).
+warn_redundant_casts = true
+warn_no_return = true
+
+[[tool.mypy.overrides]]
+module = ["tessera.core.*", "tessera.execution.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+check_untyped_defs = true
+no_implicit_optional = true
+strict_equality = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_reexport = true
