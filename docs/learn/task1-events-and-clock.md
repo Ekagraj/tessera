@@ -277,6 +277,104 @@ build them speculatively — adding things "just in case" is how projects stall.
 
 ---
 
+## Worked example with synthetic data
+
+Let's make all of this concrete with a few hand-made events. Time is in integer
+nanoseconds since the epoch. One day is `86,400,000,000,000` ns, so to keep it
+readable I'll write each day's timestamp and also its short name.
+
+```
+Day 1 (2015-01-01)  ts = 1_420_070_400_000_000_000
+Day 2 (2015-01-02)  ts = 1_420_156_800_000_000_000
+Day 3 (2015-01-03)  ts = 1_420_243_200_000_000_000
+```
+
+Two synthetic sources (think: two CSV files), each already in time order:
+
+```
+Source 0  (AAPL bars)          Source 1  (MSFT bars)
+  Day 1  close 100               Day 2  close 48
+  Day 2  close 102               Day 3  close 49
+  Day 3  close 101
+```
+
+### (a) The clock walking forward
+
+The engine advances the clock as it processes events. Watch what's allowed:
+
+```
+clock.advance(Day1)  ->  ok, now = Day1
+clock.advance(Day2)  ->  ok, now = Day2
+clock.advance(Day2)  ->  ok, now = Day2     # equal ts is fine: AAPL and MSFT
+                                            # both have a Day-2 event
+clock.advance(Day1)  ->  ClockError!        # backward -> crash, not reorder
+```
+
+That last line is the whole point of Part 3: trying to step back to Day 1 after
+we've already seen Day 2 would mean handing the strategy "old" data after it has
+seen the future — so we stop instead.
+
+### (b) Why a float would corrupt this
+
+Take Day 2's timestamp, `1_420_156_800_000_000_000` (~1.42×10¹⁸). Near that
+magnitude, a float64 can only land on **multiples of 256** — the gaps between the
+numbers it can represent are that wide up there. So these three *distinct*
+nanoseconds:
+
+```
+1_420_156_800_000_000_000
+1_420_156_800_000_000_100   (100 ns later)
+1_420_156_800_000_000_200   (200 ns later)
+```
+
+all round to the **same** float. Three different instants become one. Store time as
+a float and any two events within ~255 ns of each other sort arbitrarily. Store it
+as an integer and every one of them is exact. (For daily bars this wouldn't bite,
+but the moment you use intraday/tick data it's fatal — and you design for that now.)
+
+### (c) The tie-break at Day 2, made concrete
+
+Both sources have a Day-2 event at the *identical* timestamp. Who does the strategy
+see first? Compute each event's `ordering_key = (ts, source_priority, seq)`:
+
+```
+AAPL Day-2 bar:  key = (Day2, 0, 1)     # source 0, its 2nd event (seq 1)
+MSFT Day-2 bar:  key = (Day2, 1, 0)     # source 1, its 1st event (seq 0)
+```
+
+Compare left to right: the `ts` ties (both Day2), so we look at the next number —
+`0` vs `1`. Source 0 (AAPL) wins. **AAPL's Day-2 bar is seen before MSFT's**, every
+single run, because source 0 was listed before source 1 in the config.
+
+And here's the "stable" property in action. Suppose the two Day-2 events arrive at
+the merge in a jumbled order — MSFT first, then AAPL. Sorting by their keys:
+
+```
+unsorted:  (Day2, 1, 0)=MSFT,  (Day2, 0, 1)=AAPL
+sorted:    (Day2, 0, 1)=AAPL,  (Day2, 1, 0)=MSFT
+```
+
+Same result. No matter how the inputs are shuffled, the keys force one fixed order.
+That's exactly what the test does: it shuffles the inputs 25 different ways and
+checks the output never changes. Reproducibility, demonstrated.
+
+### Which file and function did each step
+
+So you can see what code owns what:
+
+| Step above | File | Function / type |
+|---|---|---|
+| The `Bar` events (Day 1–3, AAPL/MSFT) | `tessera/core/events.py` | `Bar` (frozen slotted dataclass) |
+| (a) advancing / rejecting time | `tessera/core/clock.py` | `Clock.advance()`, raises `ClockError` |
+| (b) integer vs float timestamp | `tessera/core/events.py` | the `ts: int` field on `Event` |
+| (c) the tie-break keys | `tessera/core/events.py` | `ordering_key(ts, source_priority, seq)` |
+| the shuffle-and-check test | `tests/test_events_clock.py` | `test_identical_timestamp_events_order_deterministically` |
+
+(The *merging* of the two sources — actually pulling events out in this order — is
+the queue's job, built in Task 2.)
+
+---
+
 ## Answer these yourself
 
 Cover the text above and try these. If you can't, re-read the linked part.

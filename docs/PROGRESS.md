@@ -7,9 +7,16 @@ A living document. It answers two questions at any point in the project:
 3. **Why is it built this way (from scratch, no code)?** — see the learning guides
    in [`docs/learn/`](learn/). One per task, written to teach the concepts:
    - [Task 1 — events and the clock](learn/task1-events-and-clock.md)
+   - [Task 2 — the event queue](learn/task2-the-event-queue.md)
+   - [Task 3 — the strategy protocol and Context](learn/task3-strategy-and-context.md)
 
 I update this after every task. It is written to be read top-to-bottom by someone
 (you, an interviewer, future-me) who has never seen the code.
+
+> **Continuing the project in a fresh session?** See
+> [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) — it records the exact per-task
+> workflow (explain-first vs. just-implement, verify, decisions log, learning
+> guide, quiz, commit rules) so the work continues in the same style.
 
 ---
 
@@ -32,8 +39,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 |-----|-----------|--------|-------|
 | 0 | Repo scaffolding | ✅ | Tree, config, tests stubbed. `pytest`/`ruff`/`mypy` all green. |
 | 1 | Event types + clock (`core/`) | ✅ | Frozen slotted events, `ordering_key` total order, monotonic clock. 8 tests pass. |
-| 2 | Event queue (`core/queue.py`) | ⬜ | k-way merge over sorted sources. |
-| 3 | Strategy protocol + Context (`strategy/`) | ⬜ | Makes lookahead structurally impossible. |
+| 2 | Event queue (`core/queue.py`) | ✅ | Heap k-way merge; O(k) memory, lazy, crashes on out-of-order sources. 13 tests pass. |
+| 3 | Strategy protocol + Context (`strategy/`) | ✅ | Fresh immutable Context, minimal surface, Order + Strategy protocol. 19 tests pass. |
 | 4 | Portfolio accounting (`portfolio/`) | ⬜ | Positions, cash, realized/unrealized PnL. |
 | 5 | Naive fill model + costs (`execution/`) | ⬜ | Fill at next open; pending/latency queue at 0. |
 | 6 | Engine loop (`core/engine.py`) | ⬜ | The centerpiece. Ordering matters. |
@@ -42,9 +49,10 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 9 | Metrics + tearsheet (`metrics/`) | ⬜ | Computed from a run directory. |
 | 10 | Data, run it, write it up | ⬜ | Real tickers, README, results. |
 
-**Right now:** Tasks 0–1 complete; nothing committed to git yet. Next is Task 2
-(the event queue) — another `core/` component, so it will be explained (design
-options + tradeoffs) and wait for your decision before any code is written.
+**Right now:** Tasks 0–3 complete (Task 1 committed; Tasks 2–3 not yet). Next is
+Task 4 (portfolio accounting: positions, cash, realized/unrealized PnL) — a
+`portfolio/` component, so it will be explained (design options + tradeoffs) and
+wait for your decision before any code is written.
 
 ---
 
@@ -74,7 +82,7 @@ As tasks land, entries move from stub → a real description of behavior.
 |------|------|--------|
 | `events.py` | Frozen slotted `Event`/`Bar`/`Trade`/`Quote` (int-ns timestamps) **plus** `ordering_key(ts, source_priority, seq)` — the total order that makes co-timestamped merges deterministic. `BookUpdate` deferred. | **done** |
 | `clock.py` | `Clock`: monotonic non-decreasing simulated time. Equal ts allowed; backward ts or reading before start raises `ClockError`; non-int ts raises `TypeError`. Never reads the wall clock. | **done** |
-| `queue.py` | The ordered event queue: merges one or more sources into one time-ordered stream. | stub |
+| `queue.py` | `merge(sources)`: a lazy heap-based k-way merge of per-source-sorted streams into one totally-ordered stream. O(k) memory; `QueueError` if a source is internally out of order. | **done** |
 | `engine.py` | The main loop tying together queue, clock, strategy, fills, portfolio, recorder. | stub |
 
 ### `tessera/execution/` — orders → fills (mypy-strict)
@@ -93,7 +101,7 @@ As tasks land, entries move from stub → a real description of behavior.
 ### `tessera/strategy/` — user strategy surface
 | File | Owns | Status |
 |------|------|--------|
-| `base.py` | The `Strategy` protocol, the read-only `Context`, and the `Order` dataclass. | stub |
+| `base.py` | `Order` (frozen intent), `Strategy` protocol (`on_event(event, ctx) -> list[Order]`), and `Context` — a fresh, frozen, per-event snapshot exposing only `ts`, `cash`, read-only `positions`, and `position(symbol)`. Look-ahead impossible by absence of any future channel. | **done** |
 | `examples/ma_crossover.py` | Moving-average crossover example (self-maintained rolling state). | stub |
 | `examples/reversal.py` | Mean-reversion example (buy after down days, sell after up days). | stub |
 
@@ -120,10 +128,11 @@ As tasks land, entries move from stub → a real description of behavior.
 ### `tests/` — the three load-bearing invariants
 | File | Asserts | Status |
 |------|---------|--------|
-| `test_no_lookahead.py` | A strategy reaching beyond the current clock must raise. | stub |
+| `test_no_lookahead.py` | Cheating strategies (peek future / forge cash / mutate positions) all raise; a legit rolling-mean strategy works; Context is an immutable snapshot. **6 tests.** | **done** |
 | `test_determinism.py` | Same config + seed twice → byte-identical records. | stub |
 | `test_accounting.py` | Cash + mark-to-market = equity at every timestamp. | stub |
 | `test_events_clock.py` | Clock moves forward only (backward raises); identical-ts events order deterministically; events are frozen + slotted. **8 tests.** | **done** |
+| `test_queue.py` | Three sources merge in order; identical ts break by source priority; out-of-order source raises; merge is lazy over infinite sources. **5 tests.** | **done** |
 
 ### Project root & docs
 | File | Purpose |
@@ -150,3 +159,13 @@ As tasks land, entries move from stub → a real description of behavior.
   (`Event`/`Bar`/`Trade`/`Quote` + `ordering_key`) and `core/clock.py` (monotonic
   `Clock`, `ClockError`). Added `tests/test_events_clock.py` — 8 tests green;
   ruff and mypy-strict clean.
+- **Task 2 — event queue.** Decisions (see `decisions.md`): heap-based k-way merge
+  over per-source-sorted streams, crash loudly on an internally out-of-order source.
+  Implemented `core/queue.py` (`merge`, `QueueError`) — lazy, O(k) memory, reusing
+  `ordering_key` for deterministic ties. Added `tests/test_queue.py` — 5 tests;
+  total 13 green; ruff and mypy-strict clean.
+- **Task 3 — strategy protocol + Context.** Decisions (see `decisions.md`): prevent
+  look-ahead by absence (no future channel on Context), fresh immutable Context per
+  event, minimal surface. Implemented `strategy/base.py` (`Order`, `Strategy`
+  protocol, `Context`) and the load-bearing `tests/test_no_lookahead.py` — 6 tests;
+  total 19 green; ruff and mypy-strict clean.

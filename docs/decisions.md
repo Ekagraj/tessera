@@ -47,3 +47,80 @@ share a ts) but a lower ts raises `ClockError` rather than silently reordering.
 Reading `ts` before the first event also raises, so nothing can act as if time
 were zero. A non-int ts (including `bool`, which is an `int` subclass) raises
 `TypeError` — we validate the invariant at the clock, not just trust mypy.
+
+---
+
+## Task 2: the event queue
+
+**Raw material — rewrite in your own words.**
+
+### D4. The queue is a heap-based k-way merge over per-source-sorted streams
+Decided: keep one pending event per source in a heap keyed by `ordering_key`; pop
+the smallest, yield it, refill from that source. Alternatives: read every event
+into one list and sort (O(N) memory — gigabytes at 50M events — plus a big upfront
+sort stall, and it cannot stream a live feed), or pre-sort all sources into one
+file the engine reads (fast reads but a stale-able build artifact that also cannot
+handle live feeds). Chose the heap merge because memory is O(k) in the number of
+sources regardless of total event count, the first event comes out immediately,
+and a live feed is just another sorted iterator — so streaming later is "add a
+source," not a rewrite. Revisit with the pre-sorted-file approach only as a caching
+optimisation for repeated runs over static history.
+
+### D5. An internally out-of-order source crashes loudly
+Decided: if a source yields an event whose `ts` is below its own previous `ts`, the
+queue raises `QueueError` naming the source and both timestamps. The alternative —
+buffering and re-sorting each source internally — hides a real data bug and
+reintroduces the O(N) memory/latency cost the heap merge exists to avoid. Chose the
+crash because out-of-order source data means the input is wrong, and catching it at
+the boundary is far cheaper than debugging a silently mis-ordered backtest. Revisit
+only if we ever ingest a source that is legitimately unsorted, which would get its
+own explicit sorting loader rather than weakening the queue.
+
+### Why the heap never compares events
+Heap entries are `(ordering_key, event)`. Because `ordering_key` is a *total* order
+and globally unique (source priority differs across sources, seq differs within a
+source), two entries never tie on the key, so Python never falls through to
+comparing the `Event` objects — which are intentionally not orderable.
+
+---
+
+## Task 3: the strategy protocol and Context
+
+**Raw material — rewrite in your own words.**
+
+### D6. Look-ahead is prevented by *absence*, not by checks
+Decided: a strategy only ever receives `on_event(event, ctx)`, and `ctx` holds only
+present-time state (`ts`, `cash`, `positions`) with no reference to the data source,
+the queue, or future events. We do not police look-ahead with runtime checks; we make
+it impossible by never handing the strategy a channel to the future. History is the
+strategy's own responsibility — it maintains a rolling buffer as instance state. The
+rejected alternative was a convenient "give me the last N bars" API on Context, which
+reintroduces the engine deciding lookback and is a slippery slope back toward handing
+over a window that contains the future. Revisit only if a legitimate need arises that
+cannot be met by the strategy keeping its own state — which would be a red flag.
+
+### D7. Context is a fresh immutable snapshot per event
+Decided: build a new frozen, slotted `Context` each event; snapshot `positions` (copy
+then wrap in a read-only `MappingProxyType`). Alternative: reuse one mutable Context
+with read-only views to avoid per-event allocation (fastest), at the cost of a live
+object that surprises a strategy caching it across events, plus a view class. Chose the
+fresh snapshot because correctness and a clean "impossible by construction" story beat
+a micro-optimisation at daily-bar volume (~2,500 events/year), and the snapshot cannot
+be tampered with or observed changing after the fact. Revisit at tick scale if
+profiling shows Context allocation matters — the swap is localised to how the engine
+builds Context and touches no strategy code.
+
+### D8. The Context surface is deliberately minimal
+Decided: expose only `ts`, `cash`, and read-only `positions` (plus a `position(symbol)`
+helper). Deliberately not exposed: the queue/data source, any history/window API,
+future prices, the recorder, or any way to mutate cash/positions. Rejected a richer
+surface (derived `equity`, per-lot average cost) because equity needs mark prices
+(accounting's job, Task 4) and average cost is the strategy's own bookkeeping — both
+widen the seam for convenience. Revisit per-field only when a concrete strategy needs
+it, never speculatively.
+
+### On Order staying a pure record
+`Order` is a frozen dataclass with exactly the seam-3 fields (`symbol, side, qty, type,
+limit_price=None, tag=""`) and no validation logic — strategies emit intent; the engine
+and fill model own correctness. `type` has no default, matching the architecture, so an
+order's kind is always explicit.

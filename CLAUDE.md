@@ -85,6 +85,10 @@ so give me the raw material rather than the finished paragraph.
 
 ## Current state
 
+**Resuming a session?** Read `docs/SESSION_HANDOFF.md` first — it records what's
+been done, what's next, and the exact per-task workflow this project follows.
+`docs/PROGRESS.md` is the source of truth for status.
+
 Week 1. Building the minimum end-to-end path: load daily bars from CSV, run a
 moving average crossover strategy, fill naively at next open with a fixed cost,
 write records to disk with a manifest, produce a tearsheet from those records.
