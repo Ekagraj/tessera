@@ -10,6 +10,7 @@ A living document. It answers two questions at any point in the project:
    - [Task 2 — the event queue](learn/task2-the-event-queue.md)
    - [Task 3 — the strategy protocol and Context](learn/task3-strategy-and-context.md)
    - [Task 4 — portfolio accounting](learn/task4-portfolio-accounting.md)
+   - [Task 5 — naive fill model and costs](learn/task5-fills-and-costs.md)
 
 I update this after every task. It is written to be read top-to-bottom by someone
 (you, an interviewer, future-me) who has never seen the code.
@@ -43,17 +44,18 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 2 | Event queue (`core/queue.py`) | ✅ | Heap k-way merge; O(k) memory, lazy, crashes on out-of-order sources. 13 tests pass. |
 | 3 | Strategy protocol + Context (`strategy/`) | ✅ | Fresh immutable Context, minimal surface, Order + Strategy protocol. 19 tests pass. |
 | 4 | Portfolio accounting (`portfolio/`) | ✅ | Average-cost book, mark-to-market accounting, flip/partial-fill handling. 23 tests pass. |
-| 5 | Naive fill model + costs (`execution/`) | ⬜ | Fill at next open; pending/latency queue at 0. |
+| 5 | Naive fill model + costs (`execution/`) | ✅ | Next-open fills, pending/latency queue at 0, bps costs, one-shot limits. 29 tests pass. |
 | 6 | Engine loop (`core/engine.py`) | ⬜ | The centerpiece. Ordering matters. |
 | 7 | Recorder, config, manifest (`runner/`) | ⬜ | Reproducible run directories. |
 | 8 | Example strategies + CLI (`strategy/`, `runner/cli.py`) | ⬜ | `tessera run ...`. |
 | 9 | Metrics + tearsheet (`metrics/`) | ⬜ | Computed from a run directory. |
 | 10 | Data, run it, write it up | ⬜ | Real tickers, README, results. |
 
-**Right now:** Tasks 0–4 complete (Tasks 0–3 committed; Task 4 not yet). Next is
-Task 5 (naive fill model + costs, with the latency/pending-order queue at zero) — an
-`execution/` component, so it will be explained (design options + tradeoffs) and wait
-for your decision before any code is written.
+**Right now:** Tasks 0–5 complete (Tasks 0–4 committed; Task 5 not yet). Next is
+Task 6 (the engine loop — the centerpiece), which ties queue + clock + strategy +
+fill model + portfolio + recorder together. A `core/` component, so it will be
+explained (the exact ordering of operations, and a plausible-but-wrong alternative)
+and wait for your decision before any code is written.
 
 ---
 
@@ -89,9 +91,9 @@ As tasks land, entries move from stub → a real description of behavior.
 ### `tessera/execution/` — orders → fills (mypy-strict)
 | File | Owns | Status |
 |------|------|--------|
-| `base.py` | The `FillModel` and `CostModel` protocols. | stub |
-| `naive.py` | `NaiveFillModel`: market orders fill at the next bar's open; pending/latency queue. | stub |
-| `costs.py` | `BpsCostModel`: fixed basis-points charge on traded notional. | stub |
+| `base.py` | The `Fill` record and the `FillModel` / `CostModel` protocols. `CostModel.cost` narrowed to `(order, fill_price, qty)`; `ctx: MarketCtx` deferred (flagged). | **done** |
+| `naive.py` | `NaiveFillModel`: market orders fill at the next bar's open via a pending queue with `arrival_ts = submit_ts + latency_ns` (default 0); limit orders get one shot at the next open. | **done** |
+| `costs.py` | `BpsCostModel(bps)`: `bps x 1e-4 x price x |qty|` charged on each fill. | **done** |
 
 ### `tessera/portfolio/` — positions & accounting
 | File | Owns | Status |
@@ -134,6 +136,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `test_accounting.py` | Cash + mark-to-market = equity through a partial fill, a long→short flip, and a close; fees are a realized drag; short-cover profit; average-cost blend. **4 tests.** | **done** |
 | `test_events_clock.py` | Clock moves forward only (backward raises); identical-ts events order deterministically; events are frozen + slotted. **8 tests.** | **done** |
 | `test_queue.py` | Three sources merge in order; identical ts break by source priority; out-of-order source raises; merge is lazy over infinite sources. **5 tests.** | **done** |
+| `test_fills.py` | Next-open fill (not current close), latency delays fill, symbol matching, bps cost, non-bar events don't fill, one-shot limit crossing. **6 tests.** | **done** |
 
 ### Project root & docs
 | File | Purpose |
@@ -175,4 +178,10 @@ As tasks land, entries move from stub → a real description of behavior.
   Implemented `portfolio/book.py` (`Book`, `Position`, `apply_fill`) and
   `portfolio/accounting.py` (`market_value`, `equity`, `unrealized_pnl`). Added the
   load-bearing `tests/test_accounting.py` — 4 tests; total 23 green; ruff and
+  mypy-strict clean.
+- **Task 5 — naive fill model + costs.** Decisions (see `decisions.md`): next-open
+  fills, pending/latency queue at 0, `CostModel` signature narrowed (defer `ctx`),
+  one-shot limits. Implemented `execution/base.py` (`Fill`, `FillModel`/`CostModel`
+  protocols), `execution/naive.py` (`NaiveFillModel`), `execution/costs.py`
+  (`BpsCostModel`). Added `tests/test_fills.py` — 6 tests; total 29 green; ruff and
   mypy-strict clean.

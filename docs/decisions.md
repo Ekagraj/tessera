@@ -166,3 +166,45 @@ Unrealized PnL and equity are computed in `accounting.py` (pure functions over t
 using a `prices` map of the latest observed market price per symbol — the last bar's
 close. The engine keeps that map current as events arrive, so a mark never uses a price
 beyond the current clock. Equity = `cash + Σ(qty x mark_price)`.
+
+---
+
+## Task 5: naive fill model and costs
+
+**Raw material — rewrite in your own words.**
+
+### D13. Market orders fill at the next bar's open, never the current close
+Decided: a decision made at bar N's close fills at bar N+1's open. Filling at bar N's
+close is look-ahead — the strategy would trade at a price it only learned once the bar
+was over, i.e. once that price was no longer actionable. The next price a bar-N decision
+can really transact at is the next open. A strategy that is profitable *only* when filled
+at the close is profitable because of that bias, not because of a real edge — a red flag,
+not a result. Revisit resolution (intrabar fills) only with finer data than daily bars.
+
+### D14. The five lies of NaiveFillModel (list them so they're honest)
+(1) Infinite liquidity — the whole order fills regardless of size. (2) No slippage — you
+always get exactly the open. (3) No spread — you never cross bid/ask. (4) Certain
+execution — no partial fills, rejects, gaps, or halts. (5) Trivial flat costs — a fixed
+bps drag independent of size/urgency/conditions, whereas real cost is nonlinear in size
+and varies with liquidity and volatility. These are acceptable *because* they are
+explicit and each is a seam we can replace later without touching strategies.
+
+### D15. Build the pending/latency queue now, at latency_ns = 0
+Decided: every order gets `arrival_ts = submit_ts + latency_ns` and waits in a pending
+queue until the clock reaches it; week 1 sets `latency_ns = 0` so behaviour is unchanged
+(fills next open). We build the plumbing now because threading a pending queue through
+the engine loop, fill model, and portfolio *later* is invasive surgery across three
+components; building it now makes adding real latency a one-line config change (seam 5).
+
+### D16. CostModel signature narrowed; `ctx: MarketCtx` deferred (flagged seam narrowing)
+Seam 4 declares `cost(order, fill_price, qty, ctx: MarketCtx)`, but `MarketCtx` does not
+exist. Rather than invent its fields speculatively, we implement `cost(order, fill_price,
+qty)` and defer `ctx` until a cost model actually needs market state (spread/impact).
+This is an explicit, temporary narrowing of the seam — not silent drift — and widening it
+later touches only our own cost models. `BpsCostModel` charges `bps x 1e-4 x price x |qty|`.
+
+### D17. Limit orders get one shot at the next open
+Decided: a limit order fills at the next open if the open crosses its limit price,
+otherwise it is cancelled (not left lingering). Week-1 strategies use only market orders,
+so this keeps the interface complete without building resting-order/expiry machinery.
+Revisit when a strategy needs true resting limits with a book (order-book replay, later).
