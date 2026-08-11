@@ -9,6 +9,7 @@ A living document. It answers two questions at any point in the project:
    - [Task 1 — events and the clock](learn/task1-events-and-clock.md)
    - [Task 2 — the event queue](learn/task2-the-event-queue.md)
    - [Task 3 — the strategy protocol and Context](learn/task3-strategy-and-context.md)
+   - [Task 4 — portfolio accounting](learn/task4-portfolio-accounting.md)
 
 I update this after every task. It is written to be read top-to-bottom by someone
 (you, an interviewer, future-me) who has never seen the code.
@@ -41,7 +42,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 1 | Event types + clock (`core/`) | ✅ | Frozen slotted events, `ordering_key` total order, monotonic clock. 8 tests pass. |
 | 2 | Event queue (`core/queue.py`) | ✅ | Heap k-way merge; O(k) memory, lazy, crashes on out-of-order sources. 13 tests pass. |
 | 3 | Strategy protocol + Context (`strategy/`) | ✅ | Fresh immutable Context, minimal surface, Order + Strategy protocol. 19 tests pass. |
-| 4 | Portfolio accounting (`portfolio/`) | ⬜ | Positions, cash, realized/unrealized PnL. |
+| 4 | Portfolio accounting (`portfolio/`) | ✅ | Average-cost book, mark-to-market accounting, flip/partial-fill handling. 23 tests pass. |
 | 5 | Naive fill model + costs (`execution/`) | ⬜ | Fill at next open; pending/latency queue at 0. |
 | 6 | Engine loop (`core/engine.py`) | ⬜ | The centerpiece. Ordering matters. |
 | 7 | Recorder, config, manifest (`runner/`) | ⬜ | Reproducible run directories. |
@@ -49,10 +50,10 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 9 | Metrics + tearsheet (`metrics/`) | ⬜ | Computed from a run directory. |
 | 10 | Data, run it, write it up | ⬜ | Real tickers, README, results. |
 
-**Right now:** Tasks 0–3 complete (Task 1 committed; Tasks 2–3 not yet). Next is
-Task 4 (portfolio accounting: positions, cash, realized/unrealized PnL) — a
-`portfolio/` component, so it will be explained (design options + tradeoffs) and
-wait for your decision before any code is written.
+**Right now:** Tasks 0–4 complete (Tasks 0–3 committed; Task 4 not yet). Next is
+Task 5 (naive fill model + costs, with the latency/pending-order queue at zero) — an
+`execution/` component, so it will be explained (design options + tradeoffs) and wait
+for your decision before any code is written.
 
 ---
 
@@ -95,8 +96,8 @@ As tasks land, entries move from stub → a real description of behavior.
 ### `tessera/portfolio/` — positions & accounting
 | File | Owns | Status |
 |------|------|--------|
-| `book.py` | The position/cash book: current holdings and cash balance. | stub |
-| `accounting.py` | Mark-to-market and realized vs unrealized PnL over the book. | stub |
+| `book.py` | `Book` (cash, positions, realized PnL) + `Position` (qty, avg cost). `apply_fill(symbol, qty, price, cost)` applies fills one at a time (average cost), splits a zero-crossing fill into close+open, expenses fees to realized. | **done** |
+| `accounting.py` | Pure functions over a `Book` + latest `prices`: `market_value`, `equity`, `unrealized_pnl`. Never mutates the book; marks at last observed price. | **done** |
 
 ### `tessera/strategy/` — user strategy surface
 | File | Owns | Status |
@@ -130,7 +131,7 @@ As tasks land, entries move from stub → a real description of behavior.
 |------|---------|--------|
 | `test_no_lookahead.py` | Cheating strategies (peek future / forge cash / mutate positions) all raise; a legit rolling-mean strategy works; Context is an immutable snapshot. **6 tests.** | **done** |
 | `test_determinism.py` | Same config + seed twice → byte-identical records. | stub |
-| `test_accounting.py` | Cash + mark-to-market = equity at every timestamp. | stub |
+| `test_accounting.py` | Cash + mark-to-market = equity through a partial fill, a long→short flip, and a close; fees are a realized drag; short-cover profit; average-cost blend. **4 tests.** | **done** |
 | `test_events_clock.py` | Clock moves forward only (backward raises); identical-ts events order deterministically; events are frozen + slotted. **8 tests.** | **done** |
 | `test_queue.py` | Three sources merge in order; identical ts break by source priority; out-of-order source raises; merge is lazy over infinite sources. **5 tests.** | **done** |
 
@@ -169,3 +170,9 @@ As tasks land, entries move from stub → a real description of behavior.
   event, minimal surface. Implemented `strategy/base.py` (`Order`, `Strategy`
   protocol, `Context`) and the load-bearing `tests/test_no_lookahead.py` — 6 tests;
   total 19 green; ruff and mypy-strict clean.
+- **Task 4 — portfolio accounting.** Decisions (see `decisions.md`): average-cost
+  basis, fills as primitives, zero-crossing split, fees expensed to realized.
+  Implemented `portfolio/book.py` (`Book`, `Position`, `apply_fill`) and
+  `portfolio/accounting.py` (`market_value`, `equity`, `unrealized_pnl`). Added the
+  load-bearing `tests/test_accounting.py` — 4 tests; total 23 green; ruff and
+  mypy-strict clean.

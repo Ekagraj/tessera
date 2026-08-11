@@ -42,13 +42,15 @@ the source of truth for *how we work*.
 ## Current state (update this after each task)
 
 - **Done:** Task 0 (scaffold), Task 1 (events + clock), Task 2 (event queue),
-  Task 3 (strategy protocol + Context).
-- **Next:** Task 4 — portfolio accounting (`portfolio/book.py`, `accounting.py`):
-  positions, cash, realized/unrealized PnL, mark-to-market. Explain-first.
-- **Git:** local repo, no remote. Commits so far: Task 0 scaffold, Task 1. Tasks 2
-  and 3 are implemented but **not yet committed** (user commits when they choose).
-- **Total tests passing:** 19 (`test_events_clock.py` 8, `test_queue.py` 5,
-  `test_no_lookahead.py` 6). Still stubbed: `test_determinism`, `test_accounting`.
+  Task 3 (strategy protocol + Context), Task 4 (portfolio accounting).
+- **Next:** Task 5 — naive fill model + costs (`execution/base.py`, `naive.py`,
+  `costs.py`), including the latency/pending-order queue with `latency_ns=0`.
+  Explain-first (`execution/` is mypy-strict).
+- **Git:** local repo, no remote. Commits so far: Task 0, 1, 2, 3. Task 4 is
+  implemented but **not yet committed** (user commits when they choose).
+- **Total tests passing:** 23 (`test_events_clock.py` 8, `test_queue.py` 5,
+  `test_no_lookahead.py` 6, `test_accounting.py` 4). Still stubbed:
+  `test_determinism`.
 
 ---
 

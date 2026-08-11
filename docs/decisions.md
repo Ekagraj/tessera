@@ -124,3 +124,45 @@ it, never speculatively.
 limit_price=None, tag=""`) and no validation logic — strategies emit intent; the engine
 and fill model own correctness. `type` has no default, matching the architecture, so an
 order's kind is always explicit.
+
+---
+
+## Task 4: portfolio accounting
+
+**Raw material — rewrite in your own words.**
+
+### D9. Realized PnL uses average-cost, not FIFO lots
+Decided: each position carries one blended `avg_price`; reducing/closing realizes
+`(exit - avg) x closed_qty`. Alternative: FIFO lot queues that realize lot-by-lot
+(needed for tax-lot accounting and matching broker statements). Chose average cost
+because over a position's full life total PnL is identical either way — the method only
+changes the *timing* of realized-vs-unrealized recognition and per-trade attribution —
+and a research backtester cares about total PnL and the equity curve, not tax lots. It
+is also O(1) state and deterministic. Revisit if we ever need tax-lot fidelity; FIFO can
+slot in behind the same `Book` interface.
+
+### D10. The book takes fills as primitives, not a Fill type
+Decided: `Book.apply_fill(symbol, qty_signed, price, cost)` rather than importing an
+execution `Fill` type. Alternative: define a shared `Fill` dataclass now. Chose
+primitives to keep the portfolio decoupled from execution (Task 5), matching the
+narrow-primitive-boundary principle from the Rust seam; the engine will translate a
+`Fill` into this call later. Revisit only if the translation becomes non-trivial.
+
+### D11. Fills apply one at a time; a zero-crossing fill is split
+Partial fills need no special handling because accounting is per-fill and additive — the
+equity identity holds after each one. A fill that opposes the current position realizes
+PnL only on the *closed* portion; if it crosses through zero (e.g. long 100, sell 150),
+the remainder opens a new position at the fill price, and realized PnL is computed only
+on the 100 that closed. Same rule under average-cost or FIFO.
+
+### D12. Fees are expensed to realized PnL immediately
+Decided: commission drains cash *and* is subtracted from realized PnL, rather than being
+capitalized into the position's cost basis. This keeps the internal cross-check exact:
+`realized + unrealized == equity - initial_cash`. `avg_price` therefore reflects pure
+trade price; fees show up as a realized drag the moment they are paid.
+
+### On the marking price
+Unrealized PnL and equity are computed in `accounting.py` (pure functions over the book)
+using a `prices` map of the latest observed market price per symbol — the last bar's
+close. The engine keeps that map current as events arrive, so a mark never uses a price
+beyond the current clock. Equity = `cash + Σ(qty x mark_price)`.
