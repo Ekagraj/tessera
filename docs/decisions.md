@@ -208,3 +208,41 @@ Decided: a limit order fills at the next open if the open crosses its limit pric
 otherwise it is cancelled (not left lingering). Week-1 strategies use only market orders,
 so this keeps the interface complete without building resting-order/expiry machinery.
 Revisit when a strategy needs true resting limits with a book (order-book replay, later).
+
+---
+
+## Task 6: the engine loop
+
+**Raw material — rewrite in your own words.**
+
+### D18. Per-iteration ordering: clock → fill past → apply → strategy → submit → record
+Decided ordering for event E at time t: advance clock; fill PAST orders against E (at
+E's open); apply those fills and record them; update the latest price; call the strategy
+on a post-fill Context; submit the new orders; record the portfolio snapshot. The crux is
+the adjacency of "fill" (step 2) and "submit" (step 6): past orders resolve before the
+strategy decides, and new orders are placed after the fill pass, so they can only fill on
+a *later* event. This makes same-bar look-ahead structurally impossible. The plausible-
+but-wrong alternative — decide, submit, then fill against the same event — fills an order
+at the very bar it was decided from, which is same-bar look-ahead bias that inflates
+returns. A milder wrong ordering (apply fills after the strategy call) isn't look-ahead
+but lets the strategy act on stale positions and double-order.
+
+### D19. The Recorder protocol lives in core, not runner (flagged deviation)
+Decided: the `Recorder` protocol lives in `core/engine.py` and the engine emits to it;
+`runner/recorder.py` (Task 7) provides implementations. The architecture's literal layout
+puts the protocol in `runner`, but the engine is in `core`, and `core` importing `runner`
+inverts the layering. Dependency inversion — the high-level engine owns the abstraction,
+the low-level runner implements it — is the clean fix. Flagged rather than done silently.
+
+### D20. Marking uses a latest-price map the engine maintains
+The engine keeps a `prices` map, updating `prices[symbol] = bar.close` as bars arrive
+(step 4), and passes it to `accounting.equity`/`unrealized_pnl` for the portfolio
+snapshot. Because the map only ever holds already-seen prices, marks never use a future
+price. Records emitted: `fill`, `order`, `portfolio` (signals deferred — no channel yet).
+
+### On the Rust seam and strategy-compute latency
+Only plain dataclasses of primitives cross the loop (`Event`, `Order`, `Fill`) and the
+only callback into user code is `Strategy.on_event`; to port the loop to Rust, the loop +
+fill model + book move to Rust while `on_event` stays the one Python boundary. A strategy's
+own compute-time latency would be modelled by offsetting the submit time in step 6
+(`submit(order, t + compute_latency)`); deferred for now, hook noted.

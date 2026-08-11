@@ -41,18 +41,17 @@ the source of truth for *how we work*.
 
 ## Current state (update this after each task)
 
-- **Done:** Task 0 (scaffold), Task 1 (events + clock), Task 2 (event queue),
-  Task 3 (strategy protocol + Context), Task 4 (portfolio accounting),
-  Task 5 (naive fill model + costs).
-- **Next:** Task 6 — the engine loop (`core/engine.py`), the centerpiece that ties
-  queue + clock + strategy + fill model + portfolio + recorder together. The exact
-  ordering of operations matters (any wrong order re-introduces look-ahead).
-  Explain-first; also unblocks the `test_determinism` load-bearing test.
-- **Git:** local repo, no remote. Commits so far: Task 0, 1, 2, 3, 4. Task 5 is
-  implemented but **not yet committed** (user commits when they choose).
-- **Total tests passing:** 29 (`test_events_clock.py` 8, `test_queue.py` 5,
-  `test_no_lookahead.py` 6, `test_accounting.py` 4, `test_fills.py` 6). Still
-  stubbed: `test_determinism`.
+- **Done:** Tasks 0–6. Engine loop is live; two of three load-bearing tests
+  (`test_no_lookahead`, `test_determinism`) now pass, `test_accounting` already did.
+- **Next:** Task 7 — recorder, config, manifest (`runner/`). Just-implement:
+  `RunConfig` (seam 7), `ParquetRecorder`/`NullRecorder`/`MultiRecorder` implementing
+  the `Recorder` protocol (which lives in `core/engine.py`), and manifest write +
+  verify. This strengthens determinism to byte-identical files on disk.
+- **Git:** local repo, no remote. Commits so far: Task 0–5. Task 6 is implemented but
+  **not yet committed** (user commits when they choose).
+- **Total tests passing:** 34 (`test_events_clock.py` 8, `test_queue.py` 5,
+  `test_no_lookahead.py` 6, `test_accounting.py` 4, `test_fills.py` 6,
+  `test_engine.py` 3, `test_determinism.py` 2).
 
 ---
 
