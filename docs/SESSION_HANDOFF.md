@@ -41,17 +41,17 @@ the source of truth for *how we work*.
 
 ## Current state (update this after each task)
 
-- **Done:** Tasks 0–6. Engine loop is live; two of three load-bearing tests
-  (`test_no_lookahead`, `test_determinism`) now pass, `test_accounting` already did.
-- **Next:** Task 7 — recorder, config, manifest (`runner/`). Just-implement:
-  `RunConfig` (seam 7), `ParquetRecorder`/`NullRecorder`/`MultiRecorder` implementing
-  the `Recorder` protocol (which lives in `core/engine.py`), and manifest write +
-  verify. This strengthens determinism to byte-identical files on disk.
-- **Git:** local repo, no remote. Commits so far: Task 0–5. Task 6 is implemented but
+- **Done:** Tasks 0–7. Runner is live: `RunConfig`, parquet/null/multi recorders,
+  and manifest write/verify. All three load-bearing tests pass.
+- **Next:** Task 8 — example strategies + CLI + CSV loader. Just-implement: the two
+  example strategies (`strategy/examples/ma_crossover.py`, `reversal.py`, each keeping
+  its own rolling state), a typer CLI at `runner/cli.py` (`tessera run ...`), and a CSV
+  bar loader at `data/sources/csv_bars.py` (converts dates → int-ns at the boundary).
+  The CLI provides the real `run_fn` that resolves a strategy + data source from a
+  `RunConfig` (which `manifest.verify` consumes).
+- **Git:** local repo, no remote. Commits so far: Task 0–6. Task 7 is implemented but
   **not yet committed** (user commits when they choose).
-- **Total tests passing:** 34 (`test_events_clock.py` 8, `test_queue.py` 5,
-  `test_no_lookahead.py` 6, `test_accounting.py` 4, `test_fills.py` 6,
-  `test_engine.py` 3, `test_determinism.py` 2).
+- **Total tests passing:** 41 (adds `test_runner.py` 7 to the previous 34).
 
 ---
 

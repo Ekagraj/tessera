@@ -246,3 +246,33 @@ only callback into user code is `Strategy.on_event`; to port the loop to Rust, t
 fill model + book move to Rust while `on_event` stays the one Python boundary. A strategy's
 own compute-time latency would be modelled by offsetting the submit time in step 6
 (`submit(order, t + compute_latency)`); deferred for now, hook noted.
+
+---
+
+## Task 7: recorder, config, manifest
+
+**Raw material — rewrite in your own words.**
+
+### D21. ParquetRecorder buffers by kind, writes once on close
+Decided: the recorder accumulates records in memory per kind and writes one parquet file
+per kind at `close` (`fill`->fills.parquet, `order`->orders.parquet,
+`portfolio`->portfolio.parquet). Parquet is columnar and write-once by nature, and
+daily-bar runs are tiny, so buffering is simplest and fine. Revisit with a streaming
+row-group writer if runs ever get large enough that holding all records in memory hurts
+(tick data). `NullRecorder` (drop everything, for benchmarks) and `MultiRecorder` (fan out
+to several) round out seam 6.
+
+### D22. `verify` re-runs via an injected run function, comparing parquet content
+Decided: `verify(run_dir, run_fn)` reads the manifest's config, re-runs it into a
+throwaway directory via `run_fn(config, recorder)`, and asserts every parquet file matches
+the stored run by *content* (`DataFrame.equals`), not raw bytes. The run function is
+injected because reconstructing a run from a config needs the strategy resolver and data
+loader, which are the CLI's job (Task 8); this keeps `manifest.py` decoupled and testable
+now. Content comparison (not byte comparison) is robust to incidental parquet metadata
+differences while still proving the records are identical.
+
+### D23. Wall-clock and git live in the runner, never the engine
+The manifest captures git commit, a sha256 content hash of the input data, python/library
+versions, the seed, and wall-clock timings. All wall-clock use (timings) and subprocess
+git calls live in `runner/manifest.py` — outside the engine, so the hard "no wall clock in
+the engine" rule is preserved. `git_commit` returns None gracefully if git is unavailable.

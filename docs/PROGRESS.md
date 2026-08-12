@@ -12,6 +12,7 @@ A living document. It answers two questions at any point in the project:
    - [Task 4 — portfolio accounting](learn/task4-portfolio-accounting.md)
    - [Task 5 — naive fill model and costs](learn/task5-fills-and-costs.md)
    - [Task 6 — the engine loop](learn/task6-the-engine-loop.md)
+   - [Task 7 — recorder, config, manifest](learn/task7-recorder-config-manifest.md)
 
 I update this after every task. It is written to be read top-to-bottom by someone
 (you, an interviewer, future-me) who has never seen the code.
@@ -47,15 +48,15 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 4 | Portfolio accounting (`portfolio/`) | ✅ | Average-cost book, mark-to-market accounting, flip/partial-fill handling. 23 tests pass. |
 | 5 | Naive fill model + costs (`execution/`) | ✅ | Next-open fills, pending/latency queue at 0, bps costs, one-shot limits. 29 tests pass. |
 | 6 | Engine loop (`core/engine.py`) | ✅ | Fixed per-iteration order (fill-past → strategy → submit); Recorder protocol; determinism live. 34 tests pass. |
-| 7 | Recorder, config, manifest (`runner/`) | ⬜ | Reproducible run directories. |
+| 7 | Recorder, config, manifest (`runner/`) | ✅ | RunConfig, Parquet/Null/Multi recorders, manifest write + verify. 41 tests pass. |
 | 8 | Example strategies + CLI (`strategy/`, `runner/cli.py`) | ⬜ | `tessera run ...`. |
 | 9 | Metrics + tearsheet (`metrics/`) | ⬜ | Computed from a run directory. |
 | 10 | Data, run it, write it up | ⬜ | Real tickers, README, results. |
 
-**Right now:** Tasks 0–6 complete (Tasks 0–5 committed; Task 6 not yet). Next is
-Task 7 (recorder, config, manifest in `runner/`), a "just-implement" component:
-`RunConfig`, the `Recorder` implementations (`ParquetRecorder`, `NullRecorder`,
-`MultiRecorder`), and manifest write + verify for reproducible run directories.
+**Right now:** Tasks 0–7 complete (Tasks 0–6 committed; Task 7 not yet). Next is
+Task 8 (example strategies + CLI + CSV loader), a "just-implement" component: the two
+example strategies (`ma_crossover`, `reversal`), a `tessera run` typer CLI, and a CSV
+bar loader — the first point where the whole system runs from one command.
 
 ---
 
@@ -117,9 +118,9 @@ As tasks land, entries move from stub → a real description of behavior.
 ### `tessera/runner/` — configs, records, manifests, CLI
 | File | Owns | Status |
 |------|------|--------|
-| `config.py` | `RunConfig`: the single immutable description of a run. | stub |
-| `manifest.py` | Manifest write + verify: reproducibility metadata per run directory. | stub |
-| `recorder.py` | `Recorder` protocol; `ParquetRecorder`, `NullRecorder`, `MultiRecorder`. | stub |
+| `config.py` | `RunConfig` (frozen, seam-7 fields) + `to_dict`/`from_dict` for the manifest. | **done** |
+| `manifest.py` | `write_manifest`/`read_manifest` (config, git commit, data hash, versions, seed, timings) and `verify(run_dir, run_fn)` re-running the config and comparing parquet content. | **done** |
+| `recorder.py` | `ParquetRecorder` (buffer by kind → fills/orders/portfolio.parquet), `NullRecorder`, `MultiRecorder`. (Protocol lives in `core/engine.py`.) | **done** |
 | `cli.py` | The typer CLI entry point: `tessera run` and `tessera report`. | stub |
 
 ### `tessera/metrics/` — offline analysis
@@ -134,6 +135,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `test_no_lookahead.py` | Cheating strategies (peek future / forge cash / mutate positions) all raise; a legit rolling-mean strategy works; Context is an immutable snapshot. **6 tests.** | **done** |
 | `test_determinism.py` | Two identical runs produce an identical record stream (byte-identical files come with Task 7). **2 tests.** | **done** |
 | `test_engine.py` | End-to-end run records fills/orders/portfolio; a bar-0 order fills at bar-1's open; final equity reflects fill + mark. **3 tests.** | **done** |
+| `test_runner.py` | Config round-trip; Null/Multi recorders; ParquetRecorder writes fills/orders/portfolio; manifest write+read; verify passes on identical rerun and fails on divergence; data hash is content-sensitive. **7 tests.** | **done** |
 | `test_accounting.py` | Cash + mark-to-market = equity through a partial fill, a long→short flip, and a close; fees are a realized drag; short-cover profit; average-cost blend. **4 tests.** | **done** |
 | `test_events_clock.py` | Clock moves forward only (backward raises); identical-ts events order deterministically; events are frozen + slotted. **8 tests.** | **done** |
 | `test_queue.py` | Three sources merge in order; identical ts break by source priority; out-of-order source raises; merge is lazy over infinite sources. **5 tests.** | **done** |
@@ -191,4 +193,10 @@ As tasks land, entries move from stub → a real description of behavior.
   Recorder protocol in core (dependency inversion), latest-price marking. Implemented
   `core/engine.py` (`run`, `Recorder` protocol). Added `tests/test_engine.py` (3) and
   the load-bearing `tests/test_determinism.py` (2); total 34 green; ruff and
+  mypy-strict clean.
+- **Task 7 — recorder, config, manifest.** Just-implement (`runner/`). Implemented
+  `runner/config.py` (`RunConfig` + dict round-trip), `runner/recorder.py`
+  (`ParquetRecorder`, `NullRecorder`, `MultiRecorder`), `runner/manifest.py`
+  (write/read + `verify` via injected run_fn, git/hash/versions/timings). Decisions
+  D21–D23. Added `tests/test_runner.py` — 7 tests; total 41 green; ruff and
   mypy-strict clean.
