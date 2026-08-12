@@ -13,6 +13,7 @@ A living document. It answers two questions at any point in the project:
    - [Task 5 — naive fill model and costs](learn/task5-fills-and-costs.md)
    - [Task 6 — the engine loop](learn/task6-the-engine-loop.md)
    - [Task 7 — recorder, config, manifest](learn/task7-recorder-config-manifest.md)
+   - [Task 8 — strategies, CSV loader, and CLI](learn/task8-strategies-and-cli.md)
 
 I update this after every task. It is written to be read top-to-bottom by someone
 (you, an interviewer, future-me) who has never seen the code.
@@ -49,14 +50,15 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 5 | Naive fill model + costs (`execution/`) | ✅ | Next-open fills, pending/latency queue at 0, bps costs, one-shot limits. 29 tests pass. |
 | 6 | Engine loop (`core/engine.py`) | ✅ | Fixed per-iteration order (fill-past → strategy → submit); Recorder protocol; determinism live. 34 tests pass. |
 | 7 | Recorder, config, manifest (`runner/`) | ✅ | RunConfig, Parquet/Null/Multi recorders, manifest write + verify. 41 tests pass. |
-| 8 | Example strategies + CLI (`strategy/`, `runner/cli.py`) | ⬜ | `tessera run ...`. |
+| 8 | Example strategies + CLI (`strategy/`, `runner/cli.py`) | ✅ | MA-crossover + reversal, CSV loader, `tessera run`/`verify`. Runs end-to-end. 45 tests pass. |
 | 9 | Metrics + tearsheet (`metrics/`) | ⬜ | Computed from a run directory. |
 | 10 | Data, run it, write it up | ⬜ | Real tickers, README, results. |
 
-**Right now:** Tasks 0–7 complete (Tasks 0–6 committed; Task 7 not yet). Next is
-Task 8 (example strategies + CLI + CSV loader), a "just-implement" component: the two
-example strategies (`ma_crossover`, `reversal`), a `tessera run` typer CLI, and a CSV
-bar loader — the first point where the whole system runs from one command.
+**Right now:** Tasks 0–8 complete (Tasks 0–7 committed; Task 8 not yet). The system
+runs end-to-end from one command (`tessera run ... && tessera verify <dir>`). Next is
+Task 9 (metrics + tearsheet in `metrics/`), a "just-implement" component computing the
+equity curve, drawdown, Sharpe, turnover, etc. from a run directory, plus a tearsheet
+figure and a `tessera report` command.
 
 ---
 
@@ -106,14 +108,16 @@ As tasks land, entries move from stub → a real description of behavior.
 | File | Owns | Status |
 |------|------|--------|
 | `base.py` | `Order` (frozen intent), `Strategy` protocol (`on_event(event, ctx) -> list[Order]`), and `Context` — a fresh, frozen, per-event snapshot exposing only `ts`, `cash`, read-only `positions`, and `position(symbol)`. Look-ahead impossible by absence of any future channel. | **done** |
+| `examples/ma_crossover.py` | `MaCrossover(fast, slow)`: long when fast SMA > slow SMA, flat otherwise. Keeps its own two ring buffers. | **done** |
+| `examples/reversal.py` | `Reversal(qty)`: long after a down day, short after an up day. Keeps only the previous close. | **done** |
 | `examples/ma_crossover.py` | Moving-average crossover example (self-maintained rolling state). | stub |
 | `examples/reversal.py` | Mean-reversion example (buy after down days, sell after up days). | stub |
 
 ### `tessera/data/` — sources → events
 | File | Owns | Status |
 |------|------|--------|
-| `loader.py` | The `DataSource` protocol: a source that yields `Iterator[Event]`. | stub |
-| `sources/csv_bars.py` | CSV daily-bar loader; converts human timestamps to integer-ns `Bar` events. | stub |
+| `loader.py` | The `DataSource` protocol: a per-symbol source that yields a time-ordered `Iterator[Event]`. | **done** |
+| `sources/csv_bars.py` | `CsvBarSource` reads a daily-bar CSV → `Bar` events; `to_epoch_ns` converts dates to int-ns (forced to `ns` resolution). The one human-time→int boundary. | **done** |
 
 ### `tessera/runner/` — configs, records, manifests, CLI
 | File | Owns | Status |
@@ -121,7 +125,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `config.py` | `RunConfig` (frozen, seam-7 fields) + `to_dict`/`from_dict` for the manifest. | **done** |
 | `manifest.py` | `write_manifest`/`read_manifest` (config, git commit, data hash, versions, seed, timings) and `verify(run_dir, run_fn)` re-running the config and comparing parquet content. | **done** |
 | `recorder.py` | `ParquetRecorder` (buffer by kind → fills/orders/portfolio.parquet), `NullRecorder`, `MultiRecorder`. (Protocol lives in `core/engine.py`.) | **done** |
-| `cli.py` | The typer CLI entry point: `tessera run` and `tessera report`. | stub |
+| `cli.py` | `tessera run` (build a RunConfig → run → write parquet + manifest) and `tessera verify`. `run_from_config` is the single reproducible core the CLI and `verify` share. | **done** |
 
 ### `tessera/metrics/` — offline analysis
 | File | Owns | Status |
@@ -136,6 +140,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `test_determinism.py` | Two identical runs produce an identical record stream (byte-identical files come with Task 7). **2 tests.** | **done** |
 | `test_engine.py` | End-to-end run records fills/orders/portfolio; a bar-0 order fills at bar-1's open; final equity reflects fill + mark. **3 tests.** | **done** |
 | `test_runner.py` | Config round-trip; Null/Multi recorders; ParquetRecorder writes fills/orders/portfolio; manifest write+read; verify passes on identical rerun and fails on divergence; data hash is content-sensitive. **7 tests.** | **done** |
+| `test_strategies_and_cli.py` | MA-crossover long→flat, reversal down/up trading, CSV loader date→int-ns, and `tessera run` produces a verifiable run directory. **4 tests.** | **done** |
 | `test_accounting.py` | Cash + mark-to-market = equity through a partial fill, a long→short flip, and a close; fees are a realized drag; short-cover profit; average-cost blend. **4 tests.** | **done** |
 | `test_events_clock.py` | Clock moves forward only (backward raises); identical-ts events order deterministically; events are frozen + slotted. **8 tests.** | **done** |
 | `test_queue.py` | Three sources merge in order; identical ts break by source priority; out-of-order source raises; merge is lazy over infinite sources. **5 tests.** | **done** |
@@ -200,3 +205,10 @@ As tasks land, entries move from stub → a real description of behavior.
   (write/read + `verify` via injected run_fn, git/hash/versions/timings). Decisions
   D21–D23. Added `tests/test_runner.py` — 7 tests; total 41 green; ruff and
   mypy-strict clean.
+- **Task 8 — strategies + CSV loader + CLI.** Just-implement. Implemented
+  `strategy/examples/ma_crossover.py` + `reversal.py` (self-maintained state),
+  `data/loader.py` (`DataSource`), `data/sources/csv_bars.py` (`CsvBarSource`,
+  `to_epoch_ns`), and `runner/cli.py` (`tessera run`/`verify`, `run_from_config`).
+  Decisions D24–D26 (incl. the pandas microsecond-resolution bug). Verified live
+  end-to-end. Added `tests/test_strategies_and_cli.py` — 4 tests; total 45 green;
+  ruff and mypy-strict clean.

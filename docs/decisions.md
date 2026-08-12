@@ -276,3 +276,30 @@ The manifest captures git commit, a sha256 content hash of the input data, pytho
 versions, the seed, and wall-clock timings. All wall-clock use (timings) and subprocess
 git calls live in `runner/manifest.py` — outside the engine, so the hard "no wall clock in
 the engine" rule is preserved. `git_commit` returns None gracefully if git is unavailable.
+
+---
+
+## Task 8: example strategies, CSV loader, and CLI
+
+**Raw material — rewrite in your own words.**
+
+### D24. Strategies hold their own rolling state (no dataframes)
+`MaCrossover` keeps two `deque` ring buffers of recent closes; `Reversal` keeps only the
+previous close. Both compute their signal from their *own* accumulated memory and read
+current position via `ctx.position(...)` — never a window handed in. This is seam 2 made
+concrete: history by self-accumulation, look-ahead impossible. Both act only on `Bar`
+events and emit market orders; `MaCrossover` is long/flat, `Reversal` is long/short and
+lets the engine's flip accounting handle direction changes.
+
+### D25. The CLI's run_from_config is the single reproducible core
+`run_from_config(config, recorder)` resolves the strategy (from a name→class registry) and
+the data sources (one `CsvBarSource` per symbol, merged by the queue), then runs the
+engine. Both the `run` command and `manifest.verify` call it, so "what the CLI does" and
+"what verify reproduces" are guaranteed identical — there is one code path, not two.
+
+### D26. Bug caught: pandas parses dates to MICROSECONDS by default
+`pd.to_datetime(...)` in pandas 3.0 returns `datetime64[us]`, so `.astype("int64")` yielded
+microseconds — every timestamp 1000x too small, which silently filtered all bars out of the
+date range. Fixed by forcing `.dt.as_unit("ns")` before converting to int. This is exactly
+the resolution trap the architecture warns about, and it lives entirely at the loader
+boundary where all human-time→int-ns conversion is confined.

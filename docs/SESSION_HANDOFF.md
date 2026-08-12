@@ -41,17 +41,16 @@ the source of truth for *how we work*.
 
 ## Current state (update this after each task)
 
-- **Done:** Tasks 0–7. Runner is live: `RunConfig`, parquet/null/multi recorders,
-  and manifest write/verify. All three load-bearing tests pass.
-- **Next:** Task 8 — example strategies + CLI + CSV loader. Just-implement: the two
-  example strategies (`strategy/examples/ma_crossover.py`, `reversal.py`, each keeping
-  its own rolling state), a typer CLI at `runner/cli.py` (`tessera run ...`), and a CSV
-  bar loader at `data/sources/csv_bars.py` (converts dates → int-ns at the boundary).
-  The CLI provides the real `run_fn` that resolves a strategy + data source from a
-  `RunConfig` (which `manifest.verify` consumes).
-- **Git:** local repo, no remote. Commits so far: Task 0–6. Task 7 is implemented but
+- **Done:** Tasks 0–8. The system runs end-to-end from one command
+  (`tessera run ...` → run dir; `tessera verify <dir>` → OK). All three load-bearing
+  tests pass.
+- **Next:** Task 9 — metrics + tearsheet (`metrics/`). Just-implement: `returns.py`
+  (equity curve, drawdown, total/annualized return, vol, Sharpe, max drawdown,
+  turnover, hit rate, avg win/avg loss — all read from a run directory's parquet, not
+  the engine) and `tearsheet.py` (one matplotlib figure). Add `tessera report <dir>`.
+- **Git:** local repo, no remote. Commits so far: Task 0–7. Task 8 is implemented but
   **not yet committed** (user commits when they choose).
-- **Total tests passing:** 41 (adds `test_runner.py` 7 to the previous 34).
+- **Total tests passing:** 45 (adds `test_strategies_and_cli.py` 4 to the previous 41).
 
 ---
 
