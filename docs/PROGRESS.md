@@ -14,6 +14,7 @@ A living document. It answers two questions at any point in the project:
    - [Task 6 — the engine loop](learn/task6-the-engine-loop.md)
    - [Task 7 — recorder, config, manifest](learn/task7-recorder-config-manifest.md)
    - [Task 8 — strategies, CSV loader, and CLI](learn/task8-strategies-and-cli.md)
+   - [Task 9 — metrics and the tearsheet](learn/task9-metrics-and-tearsheet.md)
 
 I update this after every task. It is written to be read top-to-bottom by someone
 (you, an interviewer, future-me) who has never seen the code.
@@ -51,14 +52,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 6 | Engine loop (`core/engine.py`) | ✅ | Fixed per-iteration order (fill-past → strategy → submit); Recorder protocol; determinism live. 34 tests pass. |
 | 7 | Recorder, config, manifest (`runner/`) | ✅ | RunConfig, Parquet/Null/Multi recorders, manifest write + verify. 41 tests pass. |
 | 8 | Example strategies + CLI (`strategy/`, `runner/cli.py`) | ✅ | MA-crossover + reversal, CSV loader, `tessera run`/`verify`. Runs end-to-end. 45 tests pass. |
-| 9 | Metrics + tearsheet (`metrics/`) | ⬜ | Computed from a run directory. |
+| 9 | Metrics + tearsheet (`metrics/`) | ✅ | Returns/drawdown/Sharpe/turnover from a run dir; 4-panel tearsheet; `tessera report`. 51 tests pass. |
 | 10 | Data, run it, write it up | ⬜ | Real tickers, README, results. |
 
-**Right now:** Tasks 0–8 complete (Tasks 0–7 committed; Task 8 not yet). The system
-runs end-to-end from one command (`tessera run ... && tessera verify <dir>`). Next is
-Task 9 (metrics + tearsheet in `metrics/`), a "just-implement" component computing the
-equity curve, drawdown, Sharpe, turnover, etc. from a run directory, plus a tearsheet
-figure and a `tessera report` command.
+**Right now:** Tasks 0–9 complete (Tasks 0–8 committed; Task 9 not yet). All code is
+built: run a strategy, write a reproducible run dir, and produce a tearsheet — from
+the CLI. Only Task 10 remains: pull real ticker data, run both strategies over ~10
+years, and write the README/results. Task 10 is mostly data + writing, not new engine
+code.
 
 ---
 
@@ -125,13 +126,13 @@ As tasks land, entries move from stub → a real description of behavior.
 | `config.py` | `RunConfig` (frozen, seam-7 fields) + `to_dict`/`from_dict` for the manifest. | **done** |
 | `manifest.py` | `write_manifest`/`read_manifest` (config, git commit, data hash, versions, seed, timings) and `verify(run_dir, run_fn)` re-running the config and comparing parquet content. | **done** |
 | `recorder.py` | `ParquetRecorder` (buffer by kind → fills/orders/portfolio.parquet), `NullRecorder`, `MultiRecorder`. (Protocol lives in `core/engine.py`.) | **done** |
-| `cli.py` | `tessera run` (build a RunConfig → run → write parquet + manifest) and `tessera verify`. `run_from_config` is the single reproducible core the CLI and `verify` share. | **done** |
+| `cli.py` | `tessera run` (RunConfig → run → parquet + manifest), `tessera verify`, and `tessera report` (metrics line + tearsheet PNG). `run_from_config` is the shared reproducible core. | **done** |
 
 ### `tessera/metrics/` — offline analysis
 | File | Owns | Status |
 |------|------|--------|
-| `returns.py` | Metrics from a run directory: equity curve, drawdown, Sharpe, turnover, hit rate. | stub |
-| `tearsheet.py` | A single matplotlib figure summarizing a run. | stub |
+| `returns.py` | Reads `portfolio.parquet`/`fills.parquet`; `compute_metrics` (total/annualized return, vol, Sharpe, max drawdown, turnover, hit rate, win/loss) + `equity_curve`/`drawdown_series`/`rolling_sharpe`. Offline, never the engine. | **done** |
+| `tearsheet.py` | `render(run_dir)`: a 4-panel PNG (equity, underwater drawdown, rolling 60-period Sharpe, return histogram). Headless Agg backend. | **done** |
 
 ### `tests/` — the three load-bearing invariants
 | File | Asserts | Status |
@@ -141,6 +142,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `test_engine.py` | End-to-end run records fills/orders/portfolio; a bar-0 order fills at bar-1's open; final equity reflects fill + mark. **3 tests.** | **done** |
 | `test_runner.py` | Config round-trip; Null/Multi recorders; ParquetRecorder writes fills/orders/portfolio; manifest write+read; verify passes on identical rerun and fails on divergence; data hash is content-sensitive. **7 tests.** | **done** |
 | `test_strategies_and_cli.py` | MA-crossover long→flat, reversal down/up trading, CSV loader date→int-ns, and `tessera run` produces a verifiable run directory. **4 tests.** | **done** |
+| `test_metrics.py` | Known-value total return + max drawdown, drawdown non-positive, turnover/trade count, Sharpe annualisation, tearsheet writes a PNG, missing-fills handling. **6 tests.** | **done** |
 | `test_accounting.py` | Cash + mark-to-market = equity through a partial fill, a long→short flip, and a close; fees are a realized drag; short-cover profit; average-cost blend. **4 tests.** | **done** |
 | `test_events_clock.py` | Clock moves forward only (backward raises); identical-ts events order deterministically; events are frozen + slotted. **8 tests.** | **done** |
 | `test_queue.py` | Three sources merge in order; identical ts break by source priority; out-of-order source raises; merge is lazy over infinite sources. **5 tests.** | **done** |
@@ -212,3 +214,9 @@ As tasks land, entries move from stub → a real description of behavior.
   Decisions D24–D26 (incl. the pandas microsecond-resolution bug). Verified live
   end-to-end. Added `tests/test_strategies_and_cli.py` — 4 tests; total 45 green;
   ruff and mypy-strict clean.
+- **Task 9 — metrics + tearsheet.** Just-implement (`metrics/`). Implemented
+  `metrics/returns.py` (`compute_metrics` + series helpers, all read from a run
+  directory's parquet) and `metrics/tearsheet.py` (`render` → 4-panel PNG, Agg
+  backend). Added `tessera report` to the CLI (lazy matplotlib import). Decisions
+  D27–D30. Verified live (PNG rendered + visually checked). Added
+  `tests/test_metrics.py` — 6 tests; total 51 green; ruff and mypy-strict clean.

@@ -123,5 +123,26 @@ def verify_cmd(run_dir: str = typer.Argument(..., help="a run directory to repro
     raise typer.Exit(0 if ok else 1)
 
 
+@app.command(name="report")
+def report_cmd(
+    run_dir: str = typer.Argument(..., help="a completed run directory"),
+    out: str = typer.Option("", "--out", help="PNG path (default: <run_dir>/tearsheet.png)"),
+) -> None:
+    """Compute metrics for a run and write a tearsheet PNG."""
+    # Imported lazily so `tessera run` never pays matplotlib's import cost.
+    from tessera.metrics.returns import compute_metrics
+    from tessera.metrics.tearsheet import render
+
+    m = compute_metrics(run_dir)
+    typer.echo(
+        f"total {m['total_return'] * 100:.2f}%  ann {m['annualized_return'] * 100:.2f}%  "
+        f"vol {m['annualized_vol'] * 100:.2f}%  Sharpe {m['sharpe']:.2f}  "
+        f"maxDD {m['max_drawdown'] * 100:.2f}%  turnover {m['turnover']:.2f}x  "
+        f"hit {m['hit_rate'] * 100:.1f}%  trades {int(m['n_trades'])}"
+    )
+    path = render(run_dir, out or None)
+    typer.echo(str(path))
+
+
 if __name__ == "__main__":
     app()

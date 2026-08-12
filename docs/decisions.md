@@ -303,3 +303,35 @@ microseconds — every timestamp 1000x too small, which silently filtered all ba
 date range. Fixed by forcing `.dt.as_unit("ns")` before converting to int. This is exactly
 the resolution trap the architecture warns about, and it lives entirely at the loader
 boundary where all human-time→int-ns conversion is confined.
+
+---
+
+## Task 9: metrics and tearsheet
+
+**Raw material — rewrite in your own words.**
+
+### D27. Metrics are computed offline from the record parquet, not the engine
+`metrics/returns.py` reads `portfolio.parquet` (equity curve) and `fills.parquet` (trades)
+and derives everything after the fact (seam 8). Benefits: new metrics are just new
+functions over the same records; old runs can be re-measured without re-running; and the
+engine stays lean and single-purpose. The engine never computes a Sharpe.
+
+### D28. Annualising Sharpe from daily returns assumes 252 iid days, rf = 0
+Sharpe = mean(daily return) / std(daily return) × √252. The √252 scales a per-day ratio to
+per-year and assumes returns are independent and identically distributed across 252 trading
+days a year, and that the risk-free rate is zero. If returns are autocorrelated (they often
+are), √252 overstates the annualisation — a known limitation, fine for a week-1 tearsheet.
+Volatility is annualised the same way (×√252); annualised return is geometric:
+`(equity_end/equity_start)^(252/n) − 1`.
+
+### D29. Hit rate and win/loss are per-period (daily), not per-trade
+`hit_rate`, `avg_win`, `avg_loss` are computed over the daily return series (fraction of
+up days, mean up move, mean down move), not over round-trip trades. Per-trade round-trip
+attribution under average-cost accounting is a later feature; the per-period version is a
+defensible, cheap proxy now and is clearly labelled as such.
+
+### D30. Tearsheet uses the headless Agg backend and lazy import
+`tearsheet.py` sets matplotlib's `Agg` backend before importing pyplot so it renders a PNG
+with no display. The CLI imports the metrics/tearsheet modules *lazily* inside the `report`
+command, so `tessera run` never pays matplotlib's (heavy) import cost. Four panels: equity
+curve, underwater drawdown, rolling 60-period Sharpe, return distribution.

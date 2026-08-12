@@ -41,16 +41,17 @@ the source of truth for *how we work*.
 
 ## Current state (update this after each task)
 
-- **Done:** Tasks 0–8. The system runs end-to-end from one command
-  (`tessera run ...` → run dir; `tessera verify <dir>` → OK). All three load-bearing
-  tests pass.
-- **Next:** Task 9 — metrics + tearsheet (`metrics/`). Just-implement: `returns.py`
-  (equity curve, drawdown, total/annualized return, vol, Sharpe, max drawdown,
-  turnover, hit rate, avg win/avg loss — all read from a run directory's parquet, not
-  the engine) and `tearsheet.py` (one matplotlib figure). Add `tessera report <dir>`.
-- **Git:** local repo, no remote. Commits so far: Task 0–7. Task 8 is implemented but
+- **Done:** Tasks 0–9. Full pipeline works from the CLI: `tessera run` → run dir,
+  `tessera verify` → OK, `tessera report` → metrics line + tearsheet PNG. All three
+  load-bearing tests pass.
+- **Next:** Task 10 — real data + README + results. NOT new engine code: pull free
+  daily bars (Stooq/Yahoo) for a few liquid tickers into `data/`, run both strategies
+  over ~10 years with and without costs, and write the README (what it is, mermaid
+  diagram, nine seams one-liners, how to run, results framed around transaction-cost
+  sensitivity). Then the end-of-week "interview me on the whole codebase" prompt.
+- **Git:** local repo, no remote. Commits so far: Task 0–8. Task 9 is implemented but
   **not yet committed** (user commits when they choose).
-- **Total tests passing:** 45 (adds `test_strategies_and_cli.py` 4 to the previous 41).
+- **Total tests passing:** 51 (adds `test_metrics.py` 6 to the previous 45).
 
 ---
 
