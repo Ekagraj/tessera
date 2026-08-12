@@ -261,7 +261,8 @@ Later additions and where they land, none of which disturb the above:
 Any of these breaking is a bug, and each has a test.
 
 1. A strategy can never observe an event with `ts` greater than the current clock.
-2. Two runs of the same config with the same seed produce byte-identical records.
+2. Two runs of the same config with the same seed produce identical record *content*
+   (compared as parquet rows, not raw bytes — see decisions.md D33).
 3. Cash plus mark-to-market position value equals total equity at every timestamp.
 4. No order fills at a timestamp earlier than its `arrival_ts`.
 5. Total fill quantity never exceeds order quantity.

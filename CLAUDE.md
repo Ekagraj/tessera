@@ -36,6 +36,8 @@ These override any instinct toward convenience.
 7. **Every public function gets a type hint. Every module gets a docstring
    explaining what it owns.** Not what it does line by line, what it is responsible
    for.
+8. **Never write a numeric result into a document unless it was copied from actual program output or is          hand-computable and shown to be correct. If a number is needed to illustrate a point and has not been run, write [not yet run] rather than a plausible value. A fabricated figure in a doc is a more serious defect than a bug in
+the code.
 
 ## Style
 

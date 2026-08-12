@@ -145,12 +145,20 @@ annualized figures, Sharpe, turnover, and a PNG:
 
 ```
 $ tessera report runs/reversal-AAPL-...
-total -16.11%  ann -33.4%  vol 22.1%  Sharpe -24.04  maxDD -16.11%  turnover 1.6x  hit 42% trades 118
+total -16.12%  ann -31.08%  vol 1.55%  Sharpe -24.04  maxDD -16.13%  turnover 1.58x  hit 8.5% trades 7
 runs/reversal-AAPL-.../tearsheet.png
 ```
 
-(That real reversal run *lost* money — steady bleed from trading costs × high turnover,
-which is exactly the transaction-cost story week 1 is meant to demonstrate.)
+(That reversal run *lost* money — a steady bleed from trading costs, exactly the
+transaction-cost story week 1 is meant to demonstrate.)
+
+**Read the Sharpe of −24.04 with care — it is a data artifact, not a good/bad signal.**
+It looks absurd because the *synthetic* `data/AAPL.csv` used here is a smooth sine wave,
+so its annualized volatility is only **1.55%**. Sharpe = mean ÷ std × √252, and dividing
+a small negative mean by a *tiny* std gives a huge magnitude. On realistic market data
+(volatility ~15–25%), the identical formula produces sane Sharpes in the −3…+3 range.
+The formula is correct; the toy data is not representative. (This exact point was
+verified during the week-1 audit — see `docs/AUDIT_FINDINGS.md` §1A.)
 
 ### Which file and function did each step
 

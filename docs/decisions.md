@@ -335,3 +335,54 @@ defensible, cheap proxy now and is clearly labelled as such.
 with no display. The CLI imports the metrics/tearsheet modules *lazily* inside the `report`
 command, so `tessera run` never pays matplotlib's (heavy) import cost. Four panels: equity
 curve, underwater drawdown, rolling 60-period Sharpe, return distribution.
+
+---
+
+## Audit round 1 (post-Task-9) — see docs/AUDIT.md for full evidence
+
+### D31. Reported annualized return is geometric; Sharpe uses arithmetic annualisation
+`annualized_return` is geometric `(e_end/e_start)^(252/n) − 1`; `sharpe` is
+`(mean/std)·√252`, which equals `arithmetic_ann_return/ann_vol` (`mean·252/ann_vol`). So
+`annualized_return / annualized_vol ≠ sharpe`. Both conventions are standard; revisit if we
+want one consistent annualisation basis across the tearsheet. The Sharpe itself is correct —
+proven by a hand-computed regression test and by reproducing the −24.04 run
+(`mean −0.001476, std 0.000974, ann_vol 1.55%` → `−24.0411`).
+
+**Correction note:** a `−24.04` Sharpe is NOT explained by the geometric-vs-arithmetic gap
+(with 22.1% vol that gap is only σ²/2 ≈ 2.4pp). It is huge because the synthetic
+`data/AAPL.csv` has ~1.55% volatility. A separate, real problem was found: the Task-9 learn
+doc's example report line contained **fabricated** figures (`ann −33.4%, vol 22.1%, hit 42%,
+trades 118`; real values `−31.08%, 1.55%, 8.5%, 7`). Those were corrected. Lesson: doc output
+lines must be copied from an actual run, never reconstructed.
+
+### D32. Daily bars are stamped at midnight (latent future-leak with multiple sources)
+`CsvBarSource` stamps a daily bar at 00:00 UTC of its date while it carries that day's
+close. With one source this is invisible. Once an intraday source is merged, the queue
+would emit the daily bar before that day's ticks, leaking the close. Fills inherit the
+bar's midnight ts too. Deferred fix (week 2+): stamp bars at their close time, or split
+each bar into open/close events. Flagged now so it is not discovered after building on it.
+
+### D33. Invariant 2 narrowed from "byte-identical" to "identical record content"
+`verify` compares parquet **content** (`DataFrame.equals`), not raw bytes, because correct
+parquet files can differ in incidental metadata (writer version, compression framing) while
+holding identical rows. Determinism was confirmed across two subprocesses with different
+`PYTHONHASHSEED`. ARCHITECTURE invariant 2 wording was corrected to match. This is a
+deliberate narrowing, not drift left silent.
+
+### D34. verify() checks output reproducibility, not environment match
+`verify` re-runs the config and compares output; it does **not** assert that the current git
+commit or library versions equal those in the manifest. So a run re-verified under a
+different pandas could still pass. The manifest *records* commit/versions for humans; making
+`verify` enforce them is a later enhancement.
+
+### D35. No margin / buying-power check (week-1 limitation)
+`Book.apply_fill` applies any quantity; there is no cash/margin check, so a strategy can
+order beyond its cash and `Book.cash` goes negative (equity stays flat as the position is
+marked at cost). Add this to the "naive model lies" list. A rejection path with a `reject`
+record is a later feature.
+
+### D36. Zero-event / zero-fill / never-trading runs succeed silently
+A run over an empty event stream (or a strategy that never trades, or an order on the final
+bar) completes with no error and possibly no records. This is the same silent-success that
+let the Task-8 microsecond bug through. Documented as known behaviour; a future guard could
+fail loudly when a run produces zero events or zero fills.

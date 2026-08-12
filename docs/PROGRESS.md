@@ -143,6 +143,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `test_runner.py` | Config round-trip; Null/Multi recorders; ParquetRecorder writes fills/orders/portfolio; manifest write+read; verify passes on identical rerun and fails on divergence; data hash is content-sensitive. **7 tests.** | **done** |
 | `test_strategies_and_cli.py` | MA-crossover long→flat, reversal down/up trading, CSV loader date→int-ns, and `tessera run` produces a verifiable run directory. **4 tests.** | **done** |
 | `test_metrics.py` | Known-value total return + max drawdown, drawdown non-positive, turnover/trade count, Sharpe annualisation, tearsheet writes a PNG, missing-fills handling. **6 tests.** | **done** |
+| `test_audit.py` | Audit regressions: Sharpe hand-value (no √252 bug), fill-qty invariant, final-bar-order dropped, 300-sequence accounting sweep, verify-on-changed-input, no-margin + empty-run limitations. **7 tests.** | **done** |
 | `test_accounting.py` | Cash + mark-to-market = equity through a partial fill, a long→short flip, and a close; fees are a realized drag; short-cover profit; average-cost blend. **4 tests.** | **done** |
 | `test_events_clock.py` | Clock moves forward only (backward raises); identical-ts events order deterministically; events are frozen + slotted. **8 tests.** | **done** |
 | `test_queue.py` | Three sources merge in order; identical ts break by source priority; out-of-order source raises; merge is lazy over infinite sources. **5 tests.** | **done** |
@@ -220,3 +221,10 @@ As tasks land, entries move from stub → a real description of behavior.
   backend). Added `tessera report` to the CLI (lazy matplotlib import). Decisions
   D27–D30. Verified live (PNG rendered + visually checked). Added
   `tests/test_metrics.py` — 6 tests; total 51 green; ruff and mypy-strict clean.
+- **Audit round 1 (post-Task-9).** Ran the full `docs/AUDIT.md` adversarially with
+  evidence. Result: **0 bugs** — the alleged √252 Sharpe bug is disproven by a
+  hand-computed regression test (formula is correct). Recorded 6 findings as
+  decisions D31–D36 (Sharpe annualisation basis; midnight-bar future-leak risk;
+  byte→content determinism; verify env-scope; no margin check; silent no-op runs),
+  corrected ARCHITECTURE invariant 2, and added `tests/test_audit.py` — 7 tests;
+  total 58 green. Findings written up in `docs/AUDIT.md`.

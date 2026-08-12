@@ -199,14 +199,15 @@ EVENT day2:
   clock -> day2
   fill past orders: none
   mark @ day2 close 12.5:
-    equity = 98,900 + 100 * 12.5 = 101,150
+    equity = 98,900 + 100 * 12.5 = 100,150
     unrealized = 100 * (12.5 - 11.0) = 150
   record portfolio
 ```
 
 The fill landed at **11.0 (day1 open)**, never **10.5 (day0 close)** — the seven-step
-order made that automatic. And the equity series (100,000 → 100,050 → 101,150) is what
-the metrics in Task 9 will turn into a return curve.
+order made that automatic. And the equity series (100,000 → 100,050 → 100,150) is what
+the metrics in Task 9 will turn into a return curve. (These three equity values are
+asserted by `tests/test_engine.py::test_final_equity_reflects_fill_and_mark`.)
 
 ### Which file and function did each step
 
