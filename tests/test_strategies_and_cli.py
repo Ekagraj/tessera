@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from tessera.core.events import Bar, Event
@@ -37,18 +38,31 @@ def _play(strategy: object, closes: list[float]) -> list[list[Order]]:
 
 
 def test_ma_crossover_goes_long_then_flat() -> None:
-    strat = MaCrossover(fast=2, slow=4)
+    strat = MaCrossover(fast=2, slow=4, target_frac=0.10, initial_cash=100_000.0)
     # rising then falling closes: fast crosses above slow, then back below.
     orders = _play(strat, [10, 10, 10, 10, 12, 14, 16, 8, 6, 4])
-    sides = [o.side for step in orders for o in step]
+    flat = [o for step in orders for o in step]
+    sides = [o.side for o in flat]
     assert +1 in sides and -1 in sides  # bought, then exited to flat
+    # Entry is sized to notional/price: fast(2)MA crosses above slow(4)MA at close 12,
+    # so the buy is 10_000 / 12 shares, not a fixed 100.
+    entry = next(o for o in flat if o.side == +1)
+    assert entry.qty == pytest.approx(10_000.0 / 12.0)
 
 
-def test_reversal_buys_after_down_sells_after_up() -> None:
-    orders = _play(Reversal(qty=100.0), [10.0, 9.0, 11.0])
-    # day1 (9<10, down) -> long; day2 (11>9, up) -> flip to short
+def test_reversal_flips_long_to_short_with_delta_sizing() -> None:
+    frac, cash = 0.10, 100_000.0
+    notional = frac * cash  # 10_000
+    orders = _play(Reversal(target_frac=frac, initial_cash=cash), [10.0, 9.0, 11.0])
+    # day1 (9<10, down) -> open long of notional/9 shares.
     assert orders[1][0].side == +1
+    long_qty = notional / 9.0
+    assert orders[1][0].qty == pytest.approx(long_qty)
+    # day2 (11>9, up) -> flip to short notional/11. The single order must CLOSE the long AND
+    # OPEN the short, i.e. its size is the zero-crossing delta long_qty + short_target.
     assert orders[2][0].side == -1
+    short_target = notional / 11.0
+    assert orders[2][0].qty == pytest.approx(long_qty + short_target)
 
 
 def test_csv_loader_converts_dates_to_int_ns(tmp_path: Path) -> None:

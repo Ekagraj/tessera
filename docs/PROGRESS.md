@@ -15,6 +15,7 @@ A living document. It answers two questions at any point in the project:
    - [Task 7 — recorder, config, manifest](learn/task7-recorder-config-manifest.md)
    - [Task 8 — strategies, CSV loader, and CLI](learn/task8-strategies-and-cli.md)
    - [Task 9 — metrics and the tearsheet](learn/task9-metrics-and-tearsheet.md)
+   - [Task 10 (Parts 1–2) — real data and position sizing](learn/task10-real-data-and-sizing.md)
 
 I update this after every task. It is written to be read top-to-bottom by someone
 (you, an interviewer, future-me) who has never seen the code.
@@ -53,13 +54,16 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 7 | Recorder, config, manifest (`runner/`) | ✅ | RunConfig, Parquet/Null/Multi recorders, manifest write + verify. 41 tests pass. |
 | 8 | Example strategies + CLI (`strategy/`, `runner/cli.py`) | ✅ | MA-crossover + reversal, CSV loader, `tessera run`/`verify`. Runs end-to-end. 45 tests pass. |
 | 9 | Metrics + tearsheet (`metrics/`) | ✅ | Returns/drawdown/Sharpe/turnover from a run dir; 4-panel tearsheet; `tessera report`. 51 tests pass. |
-| 10 | Data, run it, write it up | ⬜ | Real tickers, README, results. |
+| 10 | Data, run it, write it up | 🔨 | **Parts 1–2 done**: six real adjusted tickers (2005–2026) validated + all gates pass; both strategies run across all six at 0/5 bps via the CLI; fixed-share→fixed-fractional sizing bug found and fixed. **Part 3 (README) deferred to after Tasks 11–12.** |
 
-**Right now:** Tasks 0–9 complete (Tasks 0–8 committed; Task 9 not yet). All code is
-built: run a strategy, write a reproducible run dir, and produce a tearsheet — from
-the CLI. Only Task 10 remains: pull real ticker data, run both strategies over ~10
-years, and write the README/results. Task 10 is mostly data + writing, not new engine
-code.
+**Right now:** Tasks 0–9 complete and committed (through the audit). Task 10 **Parts 1–2
+done**: real adjusted daily bars for AAPL/MSFT/JPM/XOM/KO/NVDA (2005–2026) are installed in
+`data/` and pass every validation + corporate-action gate; both example strategies run across
+all six symbols at 0 and 5 bps through the real `tessera run`/`report` CLI. A position-sizing
+bug surfaced by the real prices — fixed **100-share** sizing made results a function of price
+level, not strategy — was fixed to **fixed-fractional notional** (`qty = target_frac ×
+initial_cash / close`). **Part 3 (the README) is deferred until after Tasks 11–12** so it can
+reflect what those add. 58 tests green; ruff + mypy-strict clean.
 
 ---
 
@@ -109,16 +113,14 @@ As tasks land, entries move from stub → a real description of behavior.
 | File | Owns | Status |
 |------|------|--------|
 | `base.py` | `Order` (frozen intent), `Strategy` protocol (`on_event(event, ctx) -> list[Order]`), and `Context` — a fresh, frozen, per-event snapshot exposing only `ts`, `cash`, read-only `positions`, and `position(symbol)`. Look-ahead impossible by absence of any future channel. | **done** |
-| `examples/ma_crossover.py` | `MaCrossover(fast, slow)`: long when fast SMA > slow SMA, flat otherwise. Keeps its own two ring buffers. | **done** |
-| `examples/reversal.py` | `Reversal(qty)`: long after a down day, short after an up day. Keeps only the previous close. | **done** |
-| `examples/ma_crossover.py` | Moving-average crossover example (self-maintained rolling state). | stub |
-| `examples/reversal.py` | Mean-reversion example (buy after down days, sell after up days). | stub |
+| `examples/ma_crossover.py` | `MaCrossover(fast, slow, target_frac, initial_cash)`: long when fast SMA > slow SMA, flat otherwise; keeps its own two ring buffers. Sizes by **fixed-fractional notional** (`qty = target_frac × initial_cash / close`), not a fixed share count. | **done** |
+| `examples/reversal.py` | `Reversal(target_frac, initial_cash)`: long after a down day, short after an up day; keeps only the previous close. Targets `±target_frac × initial_cash` notional and orders the **delta** to target, so a flip crosses zero in one order. | **done** |
 
 ### `tessera/data/` — sources → events
 | File | Owns | Status |
 |------|------|--------|
 | `loader.py` | The `DataSource` protocol: a per-symbol source that yields a time-ordered `Iterator[Event]`. | **done** |
-| `sources/csv_bars.py` | `CsvBarSource` reads a daily-bar CSV → `Bar` events; `to_epoch_ns` converts dates to int-ns (forced to `ns` resolution). The one human-time→int boundary. | **done** |
+| `sources/csv_bars.py` | `CsvBarSource` reads a daily-bar CSV → `Bar` events; `to_epoch_ns` converts dates to int-ns (forced to `ns` resolution). The one human-time→int boundary. Now fed **real split/dividend-adjusted Stooq bars** (2005–2026) in `data/`. | **done** |
 
 ### `tessera/runner/` — configs, records, manifests, CLI
 | File | Owns | Status |
@@ -126,7 +128,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `config.py` | `RunConfig` (frozen, seam-7 fields) + `to_dict`/`from_dict` for the manifest. | **done** |
 | `manifest.py` | `write_manifest`/`read_manifest` (config, git commit, data hash, versions, seed, timings) and `verify(run_dir, run_fn)` re-running the config and comparing parquet content. | **done** |
 | `recorder.py` | `ParquetRecorder` (buffer by kind → fills/orders/portfolio.parquet), `NullRecorder`, `MultiRecorder`. (Protocol lives in `core/engine.py`.) | **done** |
-| `cli.py` | `tessera run` (RunConfig → run → parquet + manifest), `tessera verify`, and `tessera report` (metrics line + tearsheet PNG). `run_from_config` is the shared reproducible core. | **done** |
+| `cli.py` | `tessera run` (RunConfig → run → parquet + manifest), `tessera verify`, and `tessera report` (metrics line + tearsheet PNG). `run_from_config` is the shared reproducible core. `_make_strategy` **injects `config.initial_cash`** into strategies that accept it, so fractional-notional sizing scales with the account. | **done** |
 
 ### `tessera/metrics/` — offline analysis
 | File | Owns | Status |
@@ -228,3 +230,21 @@ As tasks land, entries move from stub → a real description of behavior.
   byte→content determinism; verify env-scope; no margin check; silent no-op runs),
   corrected ARCHITECTURE invariant 2, and added `tests/test_audit.py` — 7 tests;
   total 58 green. Findings written up in `docs/AUDIT.md`.
+- **Task 10 Part 1 — real data + validation.** Just-implement (`data/`). Installed real
+  split/dividend-adjusted Stooq daily bars for AAPL/MSFT/JPM/XOM/KO/NVDA into `data/`,
+  replacing the synthetic sine wave. Widened the window to full history (2005–2026) to
+  include the 2008 crisis. Built a validation table + gates (vol band, mean|r|/std ≪ 1,
+  ~252 bars/yr, and a corporate-action split gate); **all pass** — 0 split-ratio artifacts
+  despite NVDA's 4:1/10:1 splits, proving adjustment is intact. Decisions D37 (adjusted
+  prices), D38 (2005+ scope), D39 (split gate). No code changes; no tests added.
+- **Task 10 Part 2 — run it + sizing fix.** Ran both strategies × six symbols × {0,5} bps
+  through the real `tessera run`/`report` CLI (24 runs) and verified three return identities
+  by hand. Diagnosed that fixed **100-share** sizing made results a function of price level,
+  not strategy (portfolio vol 0.48–3.75% vs underlying 18–48%; ma_crossover turnover spread
+  9.1× on 1.18× trade-count spread; 12% of AAPL PnL pre-2015). Fixed both strategies to
+  **fixed-fractional notional** (`qty = target_frac × initial_cash / close`), with the runner
+  injecting `initial_cash`; strengthened the reversal test to pin the long→short flip
+  (zero-crossing delta). Decision D40 (recorded, then **corrected**: daily rebalancing is
+  0.72% of traded notional, not a cost amplifier — turnover is exposure, not a cost proxy).
+  Still 58 tests green; ruff + mypy-strict clean. **Part 3 (README) deferred to after Tasks
+  11–12.** Learn guide: `learn/task10-real-data-and-sizing.md`.

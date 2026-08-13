@@ -7,6 +7,7 @@ by resolving the strategy and data source — the same function `manifest.verify
 
 from __future__ import annotations
 
+import inspect
 import time
 from pathlib import Path
 from typing import Any
@@ -52,10 +53,17 @@ def _parse_params(raw: str) -> dict[str, Any]:
     return params
 
 
-def _make_strategy(name: str, params: dict[str, Any]) -> Any:
+def _make_strategy(name: str, params: dict[str, Any], initial_cash: float) -> Any:
     if name not in _STRATEGIES:
         raise typer.BadParameter(f"unknown strategy '{name}'; choose from {sorted(_STRATEGIES)}")
-    return _STRATEGIES[name](**params)
+    cls = _STRATEGIES[name]
+    kwargs = dict(params)
+    # Inject starting capital so fractional-notional sizing scales with the account. It is a
+    # static config value (not market data), so this is not look-ahead. Only passed if the
+    # strategy accepts it, so a strategy that sizes some other way is unaffected.
+    if "initial_cash" in inspect.signature(cls).parameters:
+        kwargs.setdefault("initial_cash", initial_cash)
+    return cls(**kwargs)
 
 
 def run_from_config(config: RunConfig, recorder: Recorder) -> None:
@@ -63,7 +71,7 @@ def run_from_config(config: RunConfig, recorder: Recorder) -> None:
 
     This is the reproducible core the CLI and `manifest.verify` both call.
     """
-    strategy = _make_strategy(config.strategy, config.params)
+    strategy = _make_strategy(config.strategy, config.params, config.initial_cash)
     sources = [
         CsvBarSource(
             Path(config.data_source) / f"{symbol}.csv", symbol, config.start_ts, config.end_ts

@@ -41,17 +41,20 @@ the source of truth for *how we work*.
 
 ## Current state (update this after each task)
 
-- **Done:** Tasks 0–9. Full pipeline works from the CLI: `tessera run` → run dir,
-  `tessera verify` → OK, `tessera report` → metrics line + tearsheet PNG. All three
-  load-bearing tests pass.
-- **Next:** Task 10 — real data + README + results. NOT new engine code: pull free
-  daily bars (Stooq/Yahoo) for a few liquid tickers into `data/`, run both strategies
-  over ~10 years with and without costs, and write the README (what it is, mermaid
-  diagram, nine seams one-liners, how to run, results framed around transaction-cost
-  sensitivity). Then the end-of-week "interview me on the whole codebase" prompt.
-- **Git:** local repo, no remote. Commits so far: Task 0–8. Task 9 is implemented but
-  **not yet committed** (user commits when they choose).
-- **Total tests passing:** 51 (adds `test_metrics.py` 6 to the previous 45).
+- **Done:** Tasks 0–9 + audit, and **Task 10 Parts 1–2**. Full pipeline works from the CLI:
+  `tessera run` → run dir, `tessera verify` → OK, `tessera report` → metrics + tearsheet.
+  `data/` now holds **real split/dividend-adjusted Stooq bars** (six tickers, 2005–2026),
+  validated + all gates pass. Both strategies size by **fixed-fractional notional**.
+- **Next:** **Tasks 11 and 12** (new, to be specified by the user), *then* **Task 10 Part 3**
+  — the README write-up (what it is, mermaid diagram, nine seams one-liners, how to run,
+  results framed around transaction-cost sensitivity). Part 3 was intentionally reordered to
+  after 11–12 so it reflects what those add. Confirmed README material is being staged in
+  `docs/README_NOTES.md` as work lands. Then the end-of-week "interview me" prompt.
+- **Git:** local repo, no remote. Committed through the audit **and Task 10 Parts 1–2**.
+  Raw source CSVs live in `Stooq_csv/` (gitignored, like `data/`); the six installed series
+  in `data/` are also gitignored.
+- **Total tests passing:** 58 (Task-10 sizing fix strengthened an existing strategy test;
+  no new test files). ruff + mypy-strict clean.
 
 ---
 

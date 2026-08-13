@@ -1,6 +1,8 @@
 # Run output directories and raw/processed data
+# (Stooq_csv/ holds the raw downloaded source CSVs, kept local like data/)
 runs/
 data/
+Stooq_csv/
 
 # Python
 __pycache__/

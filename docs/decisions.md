@@ -386,3 +386,104 @@ A run over an empty event stream (or a strategy that never trades, or an order o
 bar) completes with no error and possibly no records. This is the same silent-success that
 let the Task-8 microsecond bug through. Documented as known behaviour; a future guard could
 fail loudly when a run produces zero events or zero fills.
+
+---
+
+## Task 10: real data (Part 1 — fetch and validate)
+
+**Raw material — rewrite in your own words.**
+
+### D37. Use Stooq's split- and dividend-adjusted daily bars as the backtest default
+Decided: the price series we backtest on are Stooq's US daily bars, which are **both split
+and dividend adjusted** (visible in the data: AAPL's adjusted close is ~$0.95 in Jan 2005,
+not its ~$32 unadjusted print, because the 7:1 2014 and 4:1 2020 splits plus every dividend
+are folded back into history). Alternatives were raw/unadjusted prices, or split-only
+adjustment. Adjusted prices are the right default because a backtest measures the return an
+investor would actually have earned holding the position: a 2:1 split is not a −50% day, and
+a dividend is cash received, not value lost. Unadjusted series inject fake overnight gaps at
+every split/ex-div date that a momentum or reversal strategy would trade on as if they were
+real moves — pure artifacts. The tradeoff: adjusted history is *revised* (today's adjusted
+2005 price changes after the next split/dividend), so a run is only reproducible against a
+pinned copy of the CSV — which is exactly why the manifest hashes the input data (seam 7).
+Revisit if we ever model dividend capture or corporate actions explicitly, which needs the
+raw series plus an actions table.
+
+### D38. Backtest window widened from 2015–2024 to full history (2005–2026)
+Decided: rather than the originally-planned ten-year window (2015-01-01…2024-12-31), use each
+symbol's full Stooq history, 2005-01-03…2026-08-11 (~21.6 years, 5,435 bars each). All six
+tickers (AAPL, MSFT, JPM, XOM, KO, NVDA) trade back to 2005, so "from 2005 for all" is clean.
+Why: the extra decade contains the **2008 financial crisis** — every symbol's largest single
+day lands in Sep 2008–Jan 2009 — which is a far stronger stress test for a momentum-vs-reversal
+comparison than a 2015–2024 sample that never sees a real crash. Consequence: the Part-1
+row-count gate ("~2,500 rows for ten years") was reinterpreted as a **density** gate (~252
+bars/year, actual 251.6) rather than an absolute count, since 21.6 years is ~5,435 rows.
+Revisit if we later want clean calendar-year boundaries (the current series ends mid-2026) or
+a fixed out-of-sample tail.
+
+### D39. Corporate-action gate: no single-day return sits near a split ratio (adjustment intact)
+Decided: the data validation includes a corporate-action gate that flags any single-day return
+within ±2 percentage points of a common forward-split signature (−50% = 2:1, −75% = 4:1,
+−80% = 5:1, −90% = 10:1) or any jump above +90% (reverse split). The reasoning: an *unadjusted*
+series prints a large fixed-ratio gap on every split date — a 10:1 split looks like a −90% day —
+which a momentum or reversal strategy would trade on as if it were a real move. Adjusted data
+folds the split back into history, so those gaps vanish. This is a stronger check than the vol
+and mean/std gates because it targets the *specific* artifact adjustment is supposed to remove.
+Result (from actual output): **0 flagged days across all six symbols**, even though the 2005–2026
+window contains real splits — AAPL 7:1 (2014) and 4:1 (2020), NVDA 4:1 (2021) and 10:1 (2024),
+KO 2:1 (2012). Unadjusted, those dates would show −86%, −75%, −90% drops; none appear, and the
+most extreme move anywhere is NVDA −30.70% (a genuine 2008 event), far from any split band. This
+is the evidence backing D37's claim that the Stooq series is correctly split/dividend adjusted.
+Revisit only if a symbol with a split we can't rule out ever trips the gate — then confirm the
+date against a known corporate-action calendar before trusting the series.
+
+---
+
+## Task 10: real data (Part 2 — running it, and the sizing fix)
+
+**Raw material — rewrite in your own words.**
+
+### D40. Example strategies size by fixed-fractional notional, not a fixed share count
+Decided: `MaCrossover` and `Reversal` size positions as a target dollar **notional** =
+`target_frac × initial_cash` (default `target_frac = 0.10`), converted to shares at the
+current bar's close (`qty = notional / event.close`). The rejected status quo was a fixed
+**share count** (`qty = 100`). On split-adjusted prices a fixed share count makes exposure a
+function of price level: a 100-share AAPL position was 0.095% of a $100k account in 2005 and
+18.4% by 2024, so the whole Part-2 table measured position sizing, not strategy — proven by
+three symptoms (portfolio vol 0.48–3.75% vs underlying 18–48%; ma_crossover trade counts flat
+at 127–150 but turnover spread 9.1×; only 12% of AAPL PnL and −0.34% of it from 2008). After
+the fix those resolve: portfolio vol tracks underlying risk (NVDA highest, KO lowest), the
+ma_crossover turnover spread falls to 1.45×, and the pre-2015 PnL share rises from 12% to 64%.
+
+Alternatives weighed (see the option write-up): **fixed fraction of equity** — better in
+principle but requires `equity` on `Context`, which Task 3/D8 deliberately excluded (equity
+needs mark prices from accounting), so it would widen seam 2; and **volatility-targeted
+sizing** — best for cross-symbol risk comparability but needs a trailing-vol estimate and more
+parameters. Fixed notional was chosen for week 1 because it fixes the actual defect with **zero
+interface change** (the strategy already sees `event.close`), keeps `Context` untouched, and
+makes turnover/cost-drag comparable across symbols — which the transaction-cost story needs.
+
+Two implementation points worth remembering:
+- **`initial_cash` is injected by the runner, not passed via params.** `cli._make_strategy`
+  passes `config.initial_cash` into any strategy whose constructor accepts it, so `target_frac`
+  scales with `--cash` and lands in `RunConfig.params`/the manifest while `initial_cash` stays a
+  top-level config field. It is a static config value, not market data, so this is not
+  look-ahead. Reproducibility holds (the CLI verify test still passes).
+- **Reversal orders the delta to target, which is where the flip lives.** `target = ±notional/
+  close`; `delta = target − ctx.position(sym)`. An up day after a long produces a single order of
+  size `held_long + short_target` that crosses zero — the exact `Book.apply_fill` split from
+  Task 4. `test_reversal_flips_long_to_short_with_delta_sizing` pins this quantity.
+
+Measured consequence (this **corrects an earlier draft of this entry**): constant-notional
+targeting rebalances daily even when the signal direction is unchanged (the target drifts with
+price), so reversal's trade *count* roughly doubled (AAPL 2,516 → 5,016). The first draft claimed
+this "amplifies cost sensitivity" — that was **wrong**, and conflated trade count with notional.
+Decomposing AAPL reversal @0bps traded notional: **flips are 99.26%** of notional (mean $20,035 ≈
+2× the $10k target), **same-direction rebalances only 0.72%** (mean $146 ≈ target × daily return),
+opens 0.02%. Because `BpsCostModel` charges on **notional, not trade count**, daily rebalancing
+adds ~0.7% to cost — negligible. The turnover rise (AAPL reversal 250x → 455x) is attributable to
+the **sizing fix, not rebalancing**: pre-2015 traded notional rose **11.8×** ($2.15M → $25.23M,
+from ~100 shares of a $1–24 stock to a constant $10k) while fills only doubled. Whether reversal
+rebalances daily or only on a signal flip is therefore a turnover/style choice with negligible
+cost impact, not a cost problem. What we still give up (deferred, not free): positions don't
+compound with the account (fixed-fraction) and aren't risk-equalised across symbols (vol-targeting)
+— NVDA at 48% vol still carries ~2.6× KO's risk per dollar.
