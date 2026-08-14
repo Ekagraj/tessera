@@ -1,8 +1,10 @@
-# Run output directories and raw/processed data
+# Run output directories and raw/processed data (root-anchored: a leading slash
+# keeps these to the repo root so they do NOT also match the source package
+# tessera/data/, which must be tracked).
 # (Stooq_csv/ holds the raw downloaded source CSVs, kept local like data/)
-runs/
-data/
-Stooq_csv/
+/runs/
+/data/
+/Stooq_csv/
 
 # Python
 __pycache__/
