@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
-from tessera.core.events import Bar, Event
+from tessera.core.events import Bar, Event, Trade
+from tessera.core.queue import merge
 from tessera.data.sources.csv_bars import CsvBarSource, to_epoch_ns
 from tessera.runner.cli import app, run_from_config
 from tessera.runner.manifest import read_manifest, verify
@@ -65,14 +67,49 @@ def test_reversal_flips_long_to_short_with_delta_sizing() -> None:
     assert orders[2][0].qty == pytest.approx(long_qty + short_target)
 
 
-def test_csv_loader_converts_dates_to_int_ns(tmp_path: Path) -> None:
+def test_csv_loader_stamps_bars_at_session_close(tmp_path: Path) -> None:
+    csv = tmp_path / "AAPL.csv"
+    # A winter date (EST) and a summer date (EDT): the fix must get the DST shift right.
+    csv.write_text(
+        "Date,Open,High,Low,Close,Volume\n"
+        "2020-01-02,10,11,9,10.5,1000\n"
+        "2020-07-01,10,11,9,10.5,1000\n"
+    )
+    bars = list(CsvBarSource(csv, "AAPL").events())
+    assert len(bars) == 2
+    assert all(isinstance(b.ts, int) for b in bars)
+    # Both code paths agree: the vectorised loader and the scalar to_epoch_ns helper.
+    assert bars[0].ts == to_epoch_ns("2020-01-02")
+    assert bars[1].ts == to_epoch_ns("2020-07-01")
+    # The stamp is the 16:00 ET session close, NOT UTC midnight (D41): 21:00 UTC in
+    # winter, 20:00 UTC in summer — the one-hour DST difference the fix has to handle.
+    def _utc(ns: int) -> pd.Timestamp:
+        return pd.Timestamp(ns, unit="ns", tz="UTC")
+
+    assert _utc(bars[0].ts) == pd.Timestamp("2020-01-02 21:00", tz="UTC")
+    assert _utc(bars[1].ts) == pd.Timestamp("2020-07-01 20:00", tz="UTC")
+    assert bars[0].close == 10.5
+
+
+def test_daily_bar_does_not_leak_ahead_of_same_day_intraday(tmp_path: Path) -> None:
+    """The D41 leak, closed: a daily bar carries the day's close, so once merged with
+    that day's intraday ticks it must sort AFTER them, not before. Under the old midnight
+    stamp the bar (00:00 UTC) preceded every tick — a future leak on the close."""
     csv = tmp_path / "AAPL.csv"
     csv.write_text("Date,Open,High,Low,Close,Volume\n2020-01-02,10,11,9,10.5,1000\n")
-    bars = list(CsvBarSource(csv, "AAPL").events())
-    assert len(bars) == 1
-    assert bars[0].ts == to_epoch_ns("2020-01-02")
-    assert isinstance(bars[0].ts, int)
-    assert bars[0].close == 10.5
+    daily = list(CsvBarSource(csv, "AAPL").events())
+
+    def _et(t: str) -> int:  # a same-session intraday instant, ET -> UTC ns
+        return int(pd.Timestamp(f"2020-01-02 {t}", tz="America/New_York").value)
+
+    intraday = [
+        Trade(_et("10:00"), "AAPL", 10.2, 100.0, +1),
+        Trade(_et("15:00"), "AAPL", 10.4, 100.0, -1),
+    ]
+    merged = list(merge([daily, intraday]))
+    # Both trades come first; the bar (the close) is last. No look-ahead.
+    assert [type(e).__name__ for e in merged] == ["Trade", "Trade", "Bar"]
+    assert merged[-1].ts > merged[0].ts
 
 
 def _write_prices(path: Path, closes: list[float]) -> None:

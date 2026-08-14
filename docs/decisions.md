@@ -361,6 +361,7 @@ close. With one source this is invisible. Once an intraday source is merged, the
 would emit the daily bar before that day's ticks, leaking the close. Fills inherit the
 bar's midnight ts too. Deferred fix (week 2+): stamp bars at their close time, or split
 each bar into open/close events. Flagged now so it is not discovered after building on it.
+**Resolved in Task 11 (D41): bars are now stamped at the 16:00 ET session close.**
 
 ### D33. Invariant 2 narrowed from "byte-identical" to "identical record content"
 `verify` compares parquet **content** (`DataFrame.equals`), not raw bytes, because correct
@@ -487,3 +488,82 @@ rebalances daily or only on a signal flip is therefore a turnover/style choice w
 cost impact, not a cost problem. What we still give up (deferred, not free): positions don't
 compound with the account (fixed-fraction) and aren't risk-equalised across symbols (vol-targeting)
 — NVDA at 48% vol still carries ~2.6× KO's risk per dollar.
+
+---
+
+## Task 11: fix the D32 midnight-bar leak (stamp bars at session close)
+
+**Raw material — rewrite in your own words.**
+
+### D41. Daily bars are stamped at the 16:00 ET session close, not UTC midnight
+Decided: `CsvBarSource` now stamps each daily bar at its **16:00 America/New_York regular-session
+close**, converted to UTC, instead of 00:00 UTC of the bar's date. This closes the latent
+look-ahead flagged as D32: a daily bar carries that day's high/low/close, which are only known
+when the session ends, so stamping it at midnight placed it ~21h before its data existed. With
+one daily source that was invisible (fills are next-open regardless), but the moment an intraday
+source is merged in, the midnight bar sorted *ahead* of that day's ticks — leaking the close.
+Chosen option A (move the one timestamp) over option B (split each bar into a separate open event
+and close event). Why A: it is **numerically behavior-preserving** for the current single-daily-
+source world — every bar shifts by the same rule, so relative order, next-open fills, equity, and
+all metrics are unchanged; only the `ts` column moves. **Verified against the actual Task-10 grid
+window** (AAPL, 2005-01-03…2024-12-31, 0 bps): re-running `ma_crossover` and `reversal` after the
+change reproduces the baseline `runs/task10p2_fixed/` rows to machine precision — total return,
+Sharpe, max drawdown, and trade count all identical (deltas 0.0), including reversal's 5016 fills /
+455× turnover, the case most sensitive to any fill-ordering change. (An earlier 2015–2024 spot-check
+was *not* comparable to the grid and was redone on the correct window.) It also stays confined to
+`data/` plus one test (one component per session), whereas B would have edited seam 1 (a new
+open-event type on `events.py`), the fill model (`execution/naive.py`), and rippled into metrics
+(portfolio rows would double, breaking the ~252/yr annualization). B fixes a leak that **cannot
+fire until week-2 intraday data exists**, so building it now is the speculative-scope failure mode
+the plan warns about. Two implementation points that mattered: (1) the conversion constructs the
+wall-clock 16:00 in `America/New_York` and converts to UTC (21:00 in winter / EST, 20:00 in summer
+/ EDT), so the **DST boundary is correct** — a fixed +21h offset would be wrong twice a year; a
+test pins both a winter and a summer date. `zoneinfo` is stdlib, so no new dependency. (2) The
+vectorized loader path adds the 16:00 wall-clock offset to the *naive* date first, then localizes,
+so DST is handled by the localize step (16:00 is never in a spring-forward gap).
+Known limitations left for when intraday data actually lands (both become B's job): **half-day
+early closes** (13:00 ET, ~13 days/yr) are not modelled — no market calendar dependency in week 1
+— so those bars are stamped 3h late, which is harmless for a single daily source; and a **fill is
+stamped at the next bar's close instant, not its true open** (its price is still the open) — a
+~6.5h-late stamp that never breaks clock monotonicity but would misplace fills relative to a real
+intraday tape. Revisit both when merging real intraday data (option B: split bars into open/close
+events, fill and stamp at the true open, and add an exchange calendar for half-days).
+Boundary caveat (found while verifying): `--start`/`--end` are now interpreted at the session
+close on **both** ends, so a config that stored a raw `end_ts` computed under the *old* midnight
+rule reinterprets — e.g. the grid's `end_ts` = 2024-12-31 00:00 UTC now sits *before* that day's
+bar (21:00 UTC), silently dropping it. New runs (dates → `to_epoch_ns` under the new rule) are
+self-consistent; old runs must be re-parameterized by date, not by their stored `ts`, to reproduce.
+The before/after grid comparison above was run by date for exactly this reason.
+Grep audit (checked no code assumes midnight stamping): no ns/day integer div/modulo anywhere; the
+only `ts`→datetime conversion is `metrics/returns.py` `equity_curve`, which uses the datetime purely
+as an index *label* — every metric is positional (`pct_change`, count-based `rolling`, annualization
+by `n` and a fixed 252), so none reads absolute time; no `resample`/date-boundary logic in `metrics/`;
+and the Task-10-Part-1 `np.busday_count` validation was interactive and never committed, so there is
+no code path to break. A bar moving 00:00→20:00/21:00 UTC also stays within the same UTC calendar
+date, so even a hypothetical floor-to-day would be unaffected.
+
+### D42. verify() versions the timestamp convention and refuses to reproduce across a change (A detects; B, deferred, cures)
+Decided: the run manifest now records a `timestamp_convention` string (currently
+`session_close_v1`), and `verify` raises `ConventionMismatch` — loud and naming both
+conventions — when a run's stored convention differs from the current code's, instead of
+silently re-running under the new rule and returning a bare `False`. This closes a real
+reproducibility break introduced by D41: because `verify` re-runs a config's stored **raw ns**
+boundaries, moving bars from midnight to the session close made the grid's `end_ts`
+(2024-12-31 00:00 UTC) fall *before* that day's bar (21:00 UTC), so a re-run silently dropped
+the final bar (empirically confirmed: `verify` returned `False`, replay 5032 rows vs stored
+5033). The convention lives in *our own code* (`to_epoch_ns`), where neither the data hash nor
+the library versions can see it — exactly the class of environment/semantic drift **D34**
+flagged as outside verify's remit. The version string is the single source of truth in
+`csv_bars.py`, imported (never re-typed), and a tripwire test pins it to the actual
+date→ns mapping so changing `to_epoch_ns` without bumping the string breaks a test rather than
+passing silently — reducing reliance on memory, the weakness of any manual version tag.
+**This is a detection fix, not a cure.** It makes the break loud; it does **not** make
+pre-Task-11 runs reproduce (their recorded output carries midnight timestamps regardless), and
+it does not stop a *future* convention change from reinterpreting boundaries — it only reports
+it. The cure is **option B (deferred): store calendar dates, not raw ns, in `RunConfig`**, so a
+boundary means "that date's session" under any convention and the bar *set* stays stable. B is a
+seam-7 schema change with a back-compat migration, so it is scheduled for the next time we touch
+`RunConfig` or when intraday bar-splitting lands (whichever first) — recorded here so the
+deferral is a deliberate decision, not an omission. Revisit A itself only if the convention
+identifier ever needs to encode more than the date→ns rule (e.g. a calendar or half-day policy),
+at which point it should become a small structured version block rather than one string.

@@ -6,18 +6,22 @@ fills/orders/portfolio parquet, and verify() re-runs the config to an identical 
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from tessera.core.engine import Recorder, run
 from tessera.core.events import Bar, Event
+from tessera.data.sources.csv_bars import TIMESTAMP_CONVENTION, to_epoch_ns
 from tessera.execution.costs import BpsCostModel
 from tessera.execution.naive import NaiveFillModel
 from tessera.portfolio.book import Book
 from tessera.runner.config import RunConfig
 from tessera.runner.manifest import (
+    ConventionMismatch,
     config_from_manifest,
     data_hash,
     read_manifest,
@@ -135,6 +139,50 @@ def test_verify_fails_when_rerun_diverges(tmp_path: Path) -> None:
         run(_bars(), FlipFlop(), fm, Book(cash=config.initial_cash), recorder)
 
     assert verify(run_dir, _diverging) is False
+
+
+def test_verify_reports_convention_mismatch_not_generic_false(tmp_path: Path) -> None:
+    """A run made under an older timestamp convention must be reported as a *convention*
+    mismatch — loud and specific — not silently re-run and returned as a bare False.
+
+    This is the guard that makes the version field load-bearing rather than decoration:
+    without the check in verify(), the tampered manifest below would re-run and (because the
+    synthetic bars are stamped by hand, not via to_epoch_ns) return True, hiding the break.
+    """
+    run_dir = tmp_path / "run"
+    rec = ParquetRecorder(run_dir)
+    _do_run(_config(), rec)
+    rec.close()
+    write_manifest(run_dir, _config(), input_hash="x", timings={"wall_seconds": 0.0})
+
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["timestamp_convention"] == TIMESTAMP_CONVENTION  # current runs are tagged
+
+    # Pretend this run was produced under the old midnight convention.
+    manifest["timestamp_convention"] = "midnight_v0"
+    (run_dir / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ConventionMismatch) as excinfo:
+        verify(run_dir, _do_run)
+    msg = str(excinfo.value)
+    assert "midnight_v0" in msg and TIMESTAMP_CONVENTION in msg  # names both, so a human sees why
+
+    # A pre-Task-11 manifest has no field at all (like runs/task10p2_fixed/): also reported.
+    del manifest["timestamp_convention"]
+    (run_dir / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ConventionMismatch):
+        verify(run_dir, _do_run)
+
+
+def test_timestamp_convention_pins_loader_behavior() -> None:
+    """Tripwire against the bump-discipline weakness: the convention string is meaningful
+    only if it tracks the actual date->ns mapping. If someone changes `to_epoch_ns` without
+    bumping `TIMESTAMP_CONVENTION`, the second assertion here fails — forcing a conscious
+    edit of this test, whose first assertion and name demand the version be bumped too.
+    """
+    assert TIMESTAMP_CONVENTION == "session_close_v1"
+    # session_close_v1 means: a date maps to its 16:00 ET close, i.e. 21:00 UTC in winter.
+    expected = int(pd.Timestamp("2020-01-02 21:00", tz="UTC").value)
+    assert to_epoch_ns("2020-01-02") == expected
 
 
 def test_data_hash_is_stable_and_content_sensitive(tmp_path: Path) -> None:

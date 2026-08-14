@@ -21,7 +21,7 @@ from tessera.execution.costs import BpsCostModel
 from tessera.execution.naive import NaiveFillModel
 from tessera.portfolio.book import Book
 from tessera.runner.config import RunConfig
-from tessera.runner.manifest import data_hash, verify, write_manifest
+from tessera.runner.manifest import ConventionMismatch, data_hash, verify, write_manifest
 from tessera.runner.recorder import ParquetRecorder
 from tessera.strategy.examples.ma_crossover import MaCrossover
 from tessera.strategy.examples.reversal import Reversal
@@ -126,7 +126,13 @@ def run_cmd(  # noqa: PLR0913 - a CLI naturally has many flags
 @app.command(name="verify")
 def verify_cmd(run_dir: str = typer.Argument(..., help="a run directory to reproduce")) -> None:
     """Re-run a run directory's manifest and confirm identical output."""
-    ok = verify(run_dir, run_from_config)
+    try:
+        ok = verify(run_dir, run_from_config)
+    except ConventionMismatch as exc:
+        # Not a reproduction failure — the run's convention predates the current code, so a
+        # faithful re-run is impossible. Report it distinctly (exit 2) instead of "MISMATCH".
+        typer.echo(f"CONVENTION MISMATCH: {exc}")
+        raise typer.Exit(2) from exc
     typer.echo("OK" if ok else "MISMATCH")
     raise typer.Exit(0 if ok else 1)
 

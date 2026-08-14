@@ -16,6 +16,7 @@ A living document. It answers two questions at any point in the project:
    - [Task 8 — strategies, CSV loader, and CLI](learn/task8-strategies-and-cli.md)
    - [Task 9 — metrics and the tearsheet](learn/task9-metrics-and-tearsheet.md)
    - [Task 10 (Parts 1–2) — real data and position sizing](learn/task10-real-data-and-sizing.md)
+   - [Task 11 — the midnight-bar leak and session-close stamping](learn/task11-session-close-stamping.md)
 
 I update this after every task. It is written to be read top-to-bottom by someone
 (you, an interviewer, future-me) who has never seen the code.
@@ -55,6 +56,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 8 | Example strategies + CLI (`strategy/`, `runner/cli.py`) | ✅ | MA-crossover + reversal, CSV loader, `tessera run`/`verify`. Runs end-to-end. 45 tests pass. |
 | 9 | Metrics + tearsheet (`metrics/`) | ✅ | Returns/drawdown/Sharpe/turnover from a run dir; 4-panel tearsheet; `tessera report`. 51 tests pass. |
 | 10 | Data, run it, write it up | 🔨 | **Parts 1–2 done**: six real adjusted tickers (2005–2026) validated + all gates pass; both strategies run across all six at 0/5 bps via the CLI; fixed-share→fixed-fractional sizing bug found and fixed. **Part 3 (README) deferred to after Tasks 11–12.** |
+| 11 | Fix the D32 midnight-bar leak (`data/`, `runner/`) | ✅ | Bars stamped at the 16:00 ET session close (UTC), not midnight — closes the latent future-leak when a daily source is merged with intraday. DST-correct (21:00 UTC winter / 20:00 summer); behavior-preserving on the single-source grid. Manifest now versions the timestamp convention so `verify` raises a loud `ConventionMismatch` instead of silently reproducing a different run (D42); option B, storing dates in `RunConfig`, scheduled. 61 tests pass. |
 
 **Right now:** Tasks 0–9 complete and committed (through the audit). Task 10 **Parts 1–2
 done**: real adjusted daily bars for AAPL/MSFT/JPM/XOM/KO/NVDA (2005–2026) are installed in
@@ -64,6 +66,23 @@ bug surfaced by the real prices — fixed **100-share** sizing made results a fu
 level, not strategy — was fixed to **fixed-fractional notional** (`qty = target_frac ×
 initial_cash / close`). **Part 3 (the README) is deferred until after Tasks 11–12** so it can
 reflect what those add. 58 tests green; ruff + mypy-strict clean.
+
+**Task 11 (done):** the D32 midnight-bar leak is closed — daily bars are now stamped at their
+**16:00 ET session close** (converted to UTC, DST-correct) instead of UTC midnight, so a daily
+bar can no longer sort ahead of that day's intraday ticks once sources are merged. Behavior-
+preserving on the single-source grid (only the `ts` column shifts; metrics reproduce exactly).
+The convention change silently broke `verify()` on pre-Task-11 runs (it re-ran a stored midnight
+`end_ts` under the new rule and dropped the final bar → bare `False`); fixed by **versioning the
+timestamp convention in the manifest (D42)** so `verify` raises a loud, explained
+`ConventionMismatch` instead. 61 tests green; ruff + mypy-strict clean.
+
+**Deferred / scheduled — Task 11 option B (the *cure* for the boundary reinterpretation).** D42's
+convention check *detects* the break loudly but does not *cure* it: a config still stores raw ns
+boundaries, so a future convention change would again reinterpret them. The cure is to **store
+calendar dates (not raw ns) in `RunConfig`** so a boundary means "that date's session" under any
+convention. This is a seam-7 schema change with a back-compat migration, so it is **scheduled for
+when `RunConfig` is next modified, or when intraday bar-splitting lands, whichever comes first.**
+Recorded as a decision (D42), not an omission.
 
 ---
 
@@ -120,13 +139,13 @@ As tasks land, entries move from stub → a real description of behavior.
 | File | Owns | Status |
 |------|------|--------|
 | `loader.py` | The `DataSource` protocol: a per-symbol source that yields a time-ordered `Iterator[Event]`. | **done** |
-| `sources/csv_bars.py` | `CsvBarSource` reads a daily-bar CSV → `Bar` events; `to_epoch_ns` converts dates to int-ns (forced to `ns` resolution). The one human-time→int boundary. Now fed **real split/dividend-adjusted Stooq bars** (2005–2026) in `data/`. | **done** |
+| `sources/csv_bars.py` | `CsvBarSource` reads a daily-bar CSV → `Bar` events; `to_epoch_ns` converts dates to int-ns (forced to `ns` resolution). The one human-time→int boundary. Stamps each bar at its **16:00 ET session close** (DST-correct via `America/New_York`→UTC), not UTC midnight, so a daily bar can't leak ahead of that day's intraday ticks (Task 11, D41). Fed **real split/dividend-adjusted Stooq bars** (2005–2026) in `data/`. | **done** |
 
 ### `tessera/runner/` — configs, records, manifests, CLI
 | File | Owns | Status |
 |------|------|--------|
 | `config.py` | `RunConfig` (frozen, seam-7 fields) + `to_dict`/`from_dict` for the manifest. | **done** |
-| `manifest.py` | `write_manifest`/`read_manifest` (config, git commit, data hash, versions, seed, timings) and `verify(run_dir, run_fn)` re-running the config and comparing parquet content. | **done** |
+| `manifest.py` | `write_manifest`/`read_manifest` (config, git commit, data hash, versions, seed, **timestamp convention**, timings) and `verify(run_dir, run_fn)` re-running the config and comparing parquet content. `verify` raises **`ConventionMismatch`** when a run's stored timestamp convention differs from the current code's, rather than silently reproducing a different run (D42). | **done** |
 | `recorder.py` | `ParquetRecorder` (buffer by kind → fills/orders/portfolio.parquet), `NullRecorder`, `MultiRecorder`. (Protocol lives in `core/engine.py`.) | **done** |
 | `cli.py` | `tessera run` (RunConfig → run → parquet + manifest), `tessera verify`, and `tessera report` (metrics line + tearsheet PNG). `run_from_config` is the shared reproducible core. `_make_strategy` **injects `config.initial_cash`** into strategies that accept it, so fractional-notional sizing scales with the account. | **done** |
 
@@ -142,8 +161,8 @@ As tasks land, entries move from stub → a real description of behavior.
 | `test_no_lookahead.py` | Cheating strategies (peek future / forge cash / mutate positions) all raise; a legit rolling-mean strategy works; Context is an immutable snapshot. **6 tests.** | **done** |
 | `test_determinism.py` | Two identical runs produce an identical record stream (byte-identical files come with Task 7). **2 tests.** | **done** |
 | `test_engine.py` | End-to-end run records fills/orders/portfolio; a bar-0 order fills at bar-1's open; final equity reflects fill + mark. **3 tests.** | **done** |
-| `test_runner.py` | Config round-trip; Null/Multi recorders; ParquetRecorder writes fills/orders/portfolio; manifest write+read; verify passes on identical rerun and fails on divergence; data hash is content-sensitive. **7 tests.** | **done** |
-| `test_strategies_and_cli.py` | MA-crossover long→flat, reversal down/up trading, CSV loader date→int-ns, and `tessera run` produces a verifiable run directory. **4 tests.** | **done** |
+| `test_runner.py` | Config round-trip; Null/Multi recorders; ParquetRecorder writes fills/orders/portfolio; manifest write+read; verify passes on identical rerun and fails on divergence; data hash is content-sensitive; **verify reports a `ConventionMismatch` (not a bare False) when a run's timestamp convention differs, and a tripwire pins the convention string to `to_epoch_ns`'s actual mapping (D42).** **9 tests.** | **done** |
+| `test_strategies_and_cli.py` | MA-crossover long→flat, reversal down/up trading, CSV loader stamps bars at the 16:00 ET session close (winter + summer, DST-correct), a merged daily bar does not leak ahead of same-day intraday ticks, and `tessera run` produces a verifiable run directory. **5 tests.** | **done** |
 | `test_metrics.py` | Known-value total return + max drawdown, drawdown non-positive, turnover/trade count, Sharpe annualisation, tearsheet writes a PNG, missing-fills handling. **6 tests.** | **done** |
 | `test_audit.py` | Audit regressions: Sharpe hand-value (no √252 bug), fill-qty invariant, final-bar-order dropped, 300-sequence accounting sweep, verify-on-changed-input, no-margin + empty-run limitations. **7 tests.** | **done** |
 | `test_accounting.py` | Cash + mark-to-market = equity through a partial fill, a long→short flip, and a close; fees are a realized drag; short-cover profit; average-cost blend. **4 tests.** | **done** |
@@ -248,3 +267,35 @@ As tasks land, entries move from stub → a real description of behavior.
   0.72% of traded notional, not a cost amplifier — turnover is exposure, not a cost proxy).
   Still 58 tests green; ruff + mypy-strict clean. **Part 3 (README) deferred to after Tasks
   11–12.** Learn guide: `learn/task10-real-data-and-sizing.md`.
+- **Task 11 — session-close bar stamping (D32 leak fix).** Explain-first (`core/`+`data/`);
+  chose **option A** (move the timestamp) over **B** (split each bar into open/close events)
+  and implemented in `data/` only. `CsvBarSource` now stamps daily bars at their **16:00 ET
+  session close** converted to UTC — 21:00 in winter (EST), 20:00 in summer (EDT) — instead of
+  UTC midnight, so a daily bar can no longer sort ahead of that day's intraday ticks once an
+  intraday source is merged in (closing the latent D32 future-leak on the close). DST is handled
+  by constructing the wall-clock close in `America/New_York` and converting (a fixed offset would
+  be wrong twice a year); `zoneinfo` is stdlib, no new dependency. Behavior-preserving on the
+  single-source grid — only the `ts` column shifts. Verified on the actual Task-10 grid window
+  (AAPL 2005-01-03…2024-12-31, 0 bps): re-running ma_crossover and reversal reproduces the baseline
+  `runs/task10p2_fixed/` rows to machine precision (total return, Sharpe, max drawdown, trade count
+  all identical, incl. reversal's 5016 fills / 455× turnover). Found one intended behavior: `--start/
+  --end` now bound at the session close on both ends, so a config storing a raw old-midnight `end_ts`
+  reinterprets and drops the boundary bar — old runs must be re-parameterized by date to reproduce.
+  Strengthened the loader test (pins winter+summer close instants) and added a
+  merge test proving a daily bar sorts after same-day intraday trades. Decision D41; D32 marked
+  resolved. Known limitations deferred to week-2 intraday work (option B's job): half-day early
+  closes not modelled (no calendar dep), and fills stamped at the next close instant not the true
+  open. Learn guide: `learn/task11-session-close-stamping.md`.
+- **Task 11 (cont.) — reproducibility guard for the convention change (D42).** The D41 stamping
+  change silently broke `verify()` on pre-Task-11 runs: because `verify` re-runs a config's stored
+  **raw ns** boundaries, the grid's midnight `end_ts` (2024-12-31 00:00 UTC) now falls before that
+  day's session-close bar (21:00 UTC), so a re-run drops the final bar and returns a bare `False`
+  (confirmed empirically: replay 5032 rows vs stored 5033). Fixed with **option A**: the manifest
+  now records a `timestamp_convention` (single source of truth in `csv_bars.py`, `session_close_v1`),
+  and `verify` raises a loud, explained **`ConventionMismatch`** on a mismatch — closing the class of
+  gap **D34** anticipated (drift in *our own* code that data-hash/versions can't see). Two hardening
+  tests: one asserts a `midnight_v0` (and field-absent) manifest triggers a *specific* mismatch, not
+  a generic False; a tripwire pins the convention string to `to_epoch_ns`'s actual mapping so
+  changing the mapping without bumping the string breaks a test. **A detects; option B (store dates
+  in `RunConfig`) cures and is scheduled** for the next `RunConfig` change or intraday bar-splitting.
+  61 tests green; ruff + mypy-strict clean.
