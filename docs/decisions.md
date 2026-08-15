@@ -615,3 +615,34 @@ kind follows (fills/orders/portfolio are likewise only written when non-empty); 
 artifact whose job is to *describe* the run, so an affirmative count belongs there. Honest boundary:
 the count affirms what the *recorder* received; it is the D43 attack test that proves the *engine*
 emits a reject when it should. Together they cover "did it reject?" from both ends.
+
+---
+
+## Validation suite: the engine vs independently computable ground truth
+
+**Raw material — rewrite in your own words.**
+
+### D44. Validate the engine against ground truth we can compute without it, not against published returns
+Decided: add `tests/test_validation.py`, which checks that the engine *reads the instrument
+correctly* — that a backtest's equity is the arithmetic consequence of the bars — against truth
+derived **independently of the engine**, never against published trader returns (which are not
+reproducible from daily bars and would validate nothing). Two kinds of check. (1) **Buy-and-hold
+vs plain pandas on the six real symbols**: a new `BuyAndHold` benchmark strategy (buy once on the
+first bar, hold forever) is run through the engine, and its total return, annualized return,
+annualized vol, and max drawdown must match the same statistics computed directly from the bars in
+numpy/pandas. They match to **0.0 (machine precision)** for all six; the *only* permitted
+discrepancy from a naive first-close hold is that the entry fills at the next bar's **open** rather
+than the first **close**, and the test asserts that residual equals **exactly the first overnight
+gap** `(close_0 - open_1)/close_0` (e.g. AAPL -0.7557%, MSFT/KO 0.0000% because their day-2 open
+equals day-1 close). Anything larger is a finding, not a tolerance to widen. (2) **Analytic anchors
+with hand-derivable answers**: a constant-daily-return series where fully-invested buy-and-hold
+equity must equal `initial x (1+r)^k` at every bar (asserted to 1e-12), and a fixed round trip
+(buy 10 @ 100, sell 10 @ 110) whose realized PnL is `10 x (110-100) = 100` and whose cash/equity
+are integer-exact. One interaction worth recording: a fully-invested buy-and-hold sized at the prior
+*close* can read fractionally above 1x gross at the next-*open* fill on a gap-up day (AAPL/XOM/NVDA
+do), which the Task-12 leverage cap would reject; that is an entry-timing artifact, not leverage, so
+the buy-and-hold validation runs with the cap relaxed (the cap has its own tests). `BuyAndHold` lives
+in `strategy/examples/` as a reusable benchmark but is **not** wired into the CLI yet (would need a
+sub-1x default or the cap caveat) — a small follow-up if the README wants a buy-and-hold row.
+Revisit by adding more analytic anchors (a known-Sharpe series, a scripted drawdown) as the engine
+grows; these are the tests that back the project's core claim, so they must never be weakened to pass.

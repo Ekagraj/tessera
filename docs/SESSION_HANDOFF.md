@@ -48,7 +48,10 @@ the source of truth for *how we work*.
   stamped at their **16:00 ET session close** (D41), closing the D32 midnight-bar leak; the manifest
   **versions that convention** so `verify` raises a loud `ConventionMismatch` on a mismatch (D42).
   The engine now enforces a **gross-leverage cap** (default 1×) — closing D35's unlimited-leverage
-  hole — rejecting over-cap fills and emitting seam-6's `reject` record (D43).
+  hole — rejecting over-cap fills and emitting seam-6's `reject` record (D43). A **validation suite**
+  (`tests/test_validation.py`, D44) checks the engine against independently computable ground truth:
+  buy-and-hold vs pandas on all six symbols (match to machine precision) plus hand-derived analytic
+  anchors. A `BuyAndHold` benchmark strategy was added (not yet CLI-wired).
 - **Scheduled work (don't lose it):** **Task 11 option B** — store *calendar dates* (not raw ns) in
   `RunConfig` so a boundary is convention-stable. D42's guard *detects* the reproducibility break; B
   *cures* it. **Trigger: the next time `RunConfig` is modified, or when intraday bar-splitting lands,
@@ -62,9 +65,9 @@ the source of truth for *how we work*.
   anchoring fix that first tracked the previously-ignored `tessera/data/` package, then Task 11).
   **Task 12 is not yet committed** (commit only when asked). Raw source CSVs live in `Stooq_csv/`
   (gitignored, like `data/`); the six installed series in `data/` are also gitignored.
-- **Total tests passing:** 64 (Task 12 added 3: the margin predicate + drift-over-limit carve-out in
-  `test_accounting.py`, the leverage-attack regression replacing the old no-margin test in
-  `test_audit.py`, and the affirmative reject-count test in `test_runner.py`). ruff + mypy-strict clean.
+- **Total tests passing:** 67 (Task 12 added 3; the validation suite `test_validation.py` added 3:
+  buy-and-hold vs pandas on the six symbols, constant-return compounding, and an exact round trip).
+  ruff + mypy-strict clean.
 
 ---
 

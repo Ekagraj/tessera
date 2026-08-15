@@ -144,6 +144,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `base.py` | `Order` (frozen intent), `Strategy` protocol (`on_event(event, ctx) -> list[Order]`), and `Context` — a fresh, frozen, per-event snapshot exposing only `ts`, `cash`, read-only `positions`, and `position(symbol)`. Look-ahead impossible by absence of any future channel. | **done** |
 | `examples/ma_crossover.py` | `MaCrossover(fast, slow, target_frac, initial_cash)`: long when fast SMA > slow SMA, flat otherwise; keeps its own two ring buffers. Sizes by **fixed-fractional notional** (`qty = target_frac × initial_cash / close`), not a fixed share count. | **done** |
 | `examples/reversal.py` | `Reversal(target_frac, initial_cash)`: long after a down day, short after an up day; keeps only the previous close. Targets `±target_frac × initial_cash` notional and orders the **delta** to target, so a flip crosses zero in one order. | **done** |
+| `examples/buy_and_hold.py` | `BuyAndHold(target_frac, initial_cash)`: buy once on the first bar (sized at that close) and hold forever — the benchmark baseline. Used by `test_validation.py` as the engine's ground-truth subject. Not wired into the CLI yet (D44). | **done** |
 
 ### `tessera/data/` — sources → events
 | File | Owns | Status |
@@ -179,6 +180,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `test_events_clock.py` | Clock moves forward only (backward raises); identical-ts events order deterministically; events are frozen + slotted. **8 tests.** | **done** |
 | `test_queue.py` | Three sources merge in order; identical ts break by source priority; out-of-order source raises; merge is lazy over infinite sources. **5 tests.** | **done** |
 | `test_fills.py` | Next-open fill (not current close), latency delays fill, symbol matching, bps cost, non-bar events don't fill, one-shot limit crossing. **6 tests.** | **done** |
+| `test_validation.py` | The engine vs **independently computable ground truth** (D44): buy-and-hold on all six real symbols reproduces pandas total/annualized return, vol, and max drawdown to machine precision, with the only residual being the next-open entry (asserted == the first overnight gap); plus analytic anchors — constant-return equity `= initial×(1+r)^k` and an integer-exact round-trip PnL. **3 tests.** | **done** |
 
 ### Project root & docs
 | File | Purpose |
@@ -327,3 +329,16 @@ As tasks land, entries move from stub → a real description of behavior.
   manifest now records per-kind `record_counts` with `reject` always seeded, so **"0 rejections" is
   affirmed in provenance, not inferred** (`ParquetRecorder.record_counts()`; tested both ways).
   64 tests green; ruff + mypy-strict clean. Learn guide: `learn/task12-margin-and-leverage.md`.
+- **Validation suite — the engine vs independent ground truth (D44).** Just-implement
+  (`strategy/examples/` + `tests/`). Added a `BuyAndHold` benchmark strategy and
+  `tests/test_validation.py`, which prove the engine reads the instrument correctly rather than
+  matching unreproducible published returns. (1) Buy-and-hold on all six real symbols reproduces
+  the total return, annualized return, annualized vol, and max drawdown computed directly from the
+  same bars in numpy/pandas — to **0.0 (machine precision)** for all six — with the only permitted
+  discrepancy from a naive first-close hold being the next-open entry, asserted to equal **exactly
+  the first overnight gap** (AAPL −0.7557%, MSFT/KO 0.0000%). (2) Analytic anchors: constant-return
+  buy-and-hold equity `= initial×(1+r)^k` (to 1e-12) and an integer-exact round trip (buy 10@100,
+  sell 10@110 → realized PnL 100). Recorded the one interaction: a fully-invested hold sized at the
+  prior close can read >1× gross at the next-open fill on a gap-up day (AAPL/XOM/NVDA), so the
+  buy-and-hold validation relaxes the Task-12 cap (an entry-timing artifact, cap tested elsewhere).
+  67 tests green; ruff + mypy-strict clean.
