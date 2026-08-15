@@ -61,8 +61,31 @@ def run(
         clock.advance(event.ts)
 
         # 2. Past orders fill against this event (at its open), then 3. apply + record.
+        # A fill that would breach the book's leverage cap is rejected (dropped, not
+        # partially filled) and recorded as a `reject` instead of applied. `prices` here
+        # still holds prior marks (updated at step 4), so the margin check never looks ahead.
         for fill in fill_model.on_event(event):
-            book.apply_fill(fill.symbol, fill.side * fill.qty, fill.price, fill.cost)
+            signed_qty = fill.side * fill.qty
+            admitted = accounting.admits_fill(
+                book, fill.symbol, signed_qty, fill.price, prices, fill.cost
+            )
+            if not admitted:
+                recorder.record(
+                    "reject",
+                    {
+                        "ts": fill.ts,
+                        "symbol": fill.symbol,
+                        "side": fill.side,
+                        "qty": fill.qty,
+                        "price": fill.price,
+                        "notional": fill.price * fill.qty,
+                        "reason": "max_leverage",
+                        "limit": book.max_leverage,
+                        "tag": fill.order_tag,
+                    },
+                )
+                continue
+            book.apply_fill(fill.symbol, signed_qty, fill.price, fill.cost)
             recorder.record(
                 "fill",
                 {

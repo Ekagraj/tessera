@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from tessera.portfolio import accounting
-from tessera.portfolio.book import Book
+from tessera.portfolio.book import Book, Position
 
 INITIAL = 100_000.0
 
@@ -88,3 +88,38 @@ def test_adding_to_a_long_blends_average_cost() -> None:
     assert pos.avg_price == pytest.approx(15.0)  # blended, no PnL realized yet
     assert book.realized_pnl == pytest.approx(0.0)
     _check_identities(book, {"AAPL": 20.0})
+
+
+# --- margin / leverage admissibility (D43) -------------------------------------
+
+def test_admits_within_cap_and_rejects_beyond_on_both_sides() -> None:
+    book = Book(cash=INITIAL)  # flat, max_leverage 1.0
+    prices = {"AAPL": 10.0}
+    # 10% notional (1,000 @ 10 = 10k) is well within 1x of 100k equity.
+    assert accounting.admits_fill(book, "AAPL", +1_000.0, 10.0, prices) is True
+    # The audit's exploit: 1,000,000 @ 10 = 10M gross on 100k equity -> rejected, long...
+    assert accounting.admits_fill(book, "AAPL", +1_000_000.0, 10.0, prices) is False
+    # ...and short (a short generates cash but still creates 10M of gross exposure).
+    assert accounting.admits_fill(book, "AAPL", -1_000_000.0, 10.0, prices) is False
+    # Exactly at the cap (gross 100k == 1x * 100k equity) is admitted, not tripped by rounding.
+    assert accounting.admits_fill(book, "AAPL", +10_000.0, 10.0, prices) is True
+
+
+def test_derisk_carveout_from_an_over_limit_state() -> None:
+    """An account can only exceed the cap via mark-to-market drift (no fill creates it),
+    e.g. a short moving against it. From there it must be able to REDUCE exposure but not
+    INCREASE it — otherwise the account locks up, a worse failure than the leverage bug.
+    """
+    # Short 1,000 @ 100 leaves cash 200k and a -1,000 position; then the price drifts up to
+    # 150 (the short loses): equity 200k - 150k = 50k, gross 150k -> leverage 3x, over the cap.
+    book = Book(cash=200_000.0, positions={"AAPL": Position(qty=-1_000.0, avg_price=100.0)})
+    prices = {"AAPL": 150.0}
+    assert accounting.equity(book, prices) == pytest.approx(50_000.0)
+    assert abs(accounting.market_value(book, prices)) == pytest.approx(150_000.0)  # 3x of 50k
+
+    # REDUCE: buy back 500 of the short -> gross falls 150k -> 75k. Allowed despite being over.
+    assert accounting.admits_fill(book, "AAPL", +500.0, 150.0, prices) is True
+    # INCREASE: short 500 more -> gross rises 150k -> 225k. Rejected.
+    assert accounting.admits_fill(book, "AAPL", -500.0, 150.0, prices) is False
+    # Fully closing (buy 1,000) is a reduction to flat -> always allowed.
+    assert accounting.admits_fill(book, "AAPL", +1_000.0, 150.0, prices) is True

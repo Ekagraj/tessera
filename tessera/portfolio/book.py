@@ -28,11 +28,20 @@ class Position:
 
 @dataclass(slots=True)
 class Book:
-    """Cash, positions, and cumulative realized PnL for one run."""
+    """Cash, positions, and cumulative realized PnL for one run.
+
+    `max_leverage` caps gross exposure at that multiple of equity (default 1.0 = no
+    leverage). The book does not enforce it — `apply_fill` still applies any quantity — so
+    that direct accounting sequences stay simple; enforcement is the engine's job, which
+    consults `accounting.admits_fill` before applying a fill and rejects it otherwise
+    (ARCHITECTURE seam 6's `reject` record). Keeping the limit here, not in `RunConfig`,
+    keeps this change inside `portfolio/`+`core/` (decision D43).
+    """
 
     cash: float
     positions: dict[str, Position] = field(default_factory=dict)
     realized_pnl: float = 0.0
+    max_leverage: float = 1.0
 
     def position(self, symbol: str) -> Position:
         """The current Position for `symbol` (a flat Position if none is held)."""

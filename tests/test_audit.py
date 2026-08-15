@@ -152,12 +152,44 @@ def test_verify_false_when_input_csv_changes(tmp_path: Path) -> None:
 
 # --- Part 4: documented week-1 limitations --------------------------------------
 
-def test_no_margin_check_cash_can_go_negative() -> None:
-    # Documented limitation: there is no buying-power check. A strategy can order
-    # far beyond its cash and the book simply goes negative.
-    book = Book(cash=100_000.0)
-    book.apply_fill("AAPL", 1_000_000.0, 10.0)  # 10M notional on 100k cash
-    assert book.cash < 0.0
+class _OrderOnce:
+    """Emits one huge market order on the first bar, then nothing. `side` picks buy/short."""
+
+    def __init__(self, side: int) -> None:
+        self._side = side
+
+    def on_event(self, event: Bar, ctx: Context) -> list[Order]:
+        if event.ts == 0:
+            return [Order("AAPL", self._side, 1_000_000.0, "market")]  # ~10M notional @ ~10
+        return []
+
+
+def _run_attack(side: int) -> tuple[Book, list[tuple[str, dict]]]:
+    rec = _Rec()
+    book = Book(cash=100_000.0)  # default max_leverage 1.0
+    # Order on bar 0 fills against bar 1's open (~10) -> ~10M gross on a 100k account.
+    fm = NaiveFillModel(BpsCostModel(0.0))
+    run([_bar(0, 10.0), _bar(1, 10.0)], _OrderOnce(side), fm, book, rec)
+    return book, rec.records
+
+
+def test_leverage_attack_is_rejected_long_and_short() -> None:
+    # D43 regression for the exact vector the audit found (this replaces the old
+    # test_no_margin_check_cash_can_go_negative, which asserted the *bug*). A strategy that
+    # tries to buy 10M of notional on 100k — and its mirror that shorts 10M — must both be
+    # rejected, emit a reject record, apply no fill, and leave equity untouched at 100k.
+    for side in (+1, -1):
+        book, records = _run_attack(side)
+        kinds = [k for k, _ in records]
+        assert kinds.count("reject") == 1, f"side={side}: {kinds}"
+        assert "fill" not in kinds, f"side={side}: a fill was applied despite over-leverage"
+        reject = next(p for k, p in records if k == "reject")
+        assert reject["reason"] == "max_leverage"
+        assert reject["side"] == side
+        # No fill applied: cash and equity are exactly the starting 100k.
+        assert book.cash == pytest.approx(100_000.0)
+        assert accounting.equity(book, {"AAPL": 10.0}) == pytest.approx(100_000.0)
+        assert book.positions == {}
 
 
 def test_empty_event_stream_completes_without_error() -> None:

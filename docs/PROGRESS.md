@@ -17,6 +17,7 @@ A living document. It answers two questions at any point in the project:
    - [Task 9 — metrics and the tearsheet](learn/task9-metrics-and-tearsheet.md)
    - [Task 10 (Parts 1–2) — real data and position sizing](learn/task10-real-data-and-sizing.md)
    - [Task 11 — the midnight-bar leak and session-close stamping](learn/task11-session-close-stamping.md)
+   - [Task 12 — the margin / leverage check](learn/task12-margin-and-leverage.md)
 
 I update this after every task. It is written to be read top-to-bottom by someone
 (you, an interviewer, future-me) who has never seen the code.
@@ -57,6 +58,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started
 | 9 | Metrics + tearsheet (`metrics/`) | ✅ | Returns/drawdown/Sharpe/turnover from a run dir; 4-panel tearsheet; `tessera report`. 51 tests pass. |
 | 10 | Data, run it, write it up | 🔨 | **Parts 1–2 done**: six real adjusted tickers (2005–2026) validated + all gates pass; both strategies run across all six at 0/5 bps via the CLI; fixed-share→fixed-fractional sizing bug found and fixed. **Part 3 (README) deferred to after Tasks 11–12.** |
 | 11 | Fix the D32 midnight-bar leak (`data/`, `runner/`) | ✅ | Bars stamped at the 16:00 ET session close (UTC), not midnight — closes the latent future-leak when a daily source is merged with intraday. DST-correct (21:00 UTC winter / 20:00 summer); behavior-preserving on the single-source grid. Manifest now versions the timestamp convention so `verify` raises a loud `ConventionMismatch` instead of silently reproducing a different run (D42); option B, storing dates in `RunConfig`, scheduled. 61 tests pass. |
+| 12 | Margin / leverage check (`portfolio/`, `core/`) | ✅ | Closes D35 (the only real return-inflation vector): the engine rejects a fill that would push gross exposure above `max_leverage × equity` (default 1×), dropping the order and emitting seam-6's `reject` record. Covers shorts; de-risking always allowed. Pure predicate `accounting.admits_fill`. Zero rejections + identical metrics on the grid. 63 tests pass. |
 
 **Right now:** Tasks 0–9 complete and committed (through the audit). Task 10 **Parts 1–2
 done**: real adjusted daily bars for AAPL/MSFT/JPM/XOM/KO/NVDA (2005–2026) are installed in
@@ -75,6 +77,14 @@ The convention change silently broke `verify()` on pre-Task-11 runs (it re-ran a
 `end_ts` under the new rule and dropped the final bar → bare `False`); fixed by **versioning the
 timestamp convention in the manifest (D42)** so `verify` raises a loud, explained
 `ConventionMismatch` instead. 61 tests green; ruff + mypy-strict clean.
+
+**Task 12 (done):** the D35 no-margin hole is closed — the engine rejects any fill that would push
+gross exposure above `max_leverage × equity` (default 1×), dropping the order and emitting seam-6's
+`reject` record (its first use). The rule covers **shorts** (a cash floor alone wouldn't), marks
+look-ahead-safe, and always permits **de-risking** so a drift-over-limit account never locks up. The
+audit's 10M-notional exploit (long and short) is now a passing regression test. Grid: zero rejections,
+byte-identical metrics. The manifest also records per-kind `record_counts`, so a run states its reject
+count (0 or N) affirmatively rather than by the absence of a file. 64 tests green; ruff + mypy-strict clean.
 
 **Deferred / scheduled — Task 11 option B (the *cure* for the boundary reinterpretation).** D42's
 convention check *detects* the break loudly but does not *cure* it: a config still stores raw ns
@@ -113,7 +123,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | `events.py` | Frozen slotted `Event`/`Bar`/`Trade`/`Quote` (int-ns timestamps) **plus** `ordering_key(ts, source_priority, seq)` — the total order that makes co-timestamped merges deterministic. `BookUpdate` deferred. | **done** |
 | `clock.py` | `Clock`: monotonic non-decreasing simulated time. Equal ts allowed; backward ts or reading before start raises `ClockError`; non-int ts raises `TypeError`. Never reads the wall clock. | **done** |
 | `queue.py` | `merge(sources)`: a lazy heap-based k-way merge of per-source-sorted streams into one totally-ordered stream. O(k) memory; `QueueError` if a source is internally out of order. | **done** |
-| `engine.py` | `run(events, strategy, fill_model, book, recorder)`: the loop. Per event — advance clock, fill past orders at the open, apply + record, mark, call strategy, submit new orders, record portfolio. Also owns the `Recorder` protocol. Emits `fill`/`order`/`portfolio` records; returns nothing. | **done** |
+| `engine.py` | `run(events, strategy, fill_model, book, recorder)`: the loop. Per event — advance clock, fill past orders at the open (rejecting any that would breach the book's leverage cap via `accounting.admits_fill`, emitting a `reject` record instead of applying), apply + record, mark, call strategy, submit new orders, record portfolio. Also owns the `Recorder` protocol. Emits `fill`/`order`/`portfolio`/`reject` records; returns nothing. | **done** |
 
 ### `tessera/execution/` — orders → fills (mypy-strict)
 | File | Owns | Status |
@@ -125,8 +135,8 @@ As tasks land, entries move from stub → a real description of behavior.
 ### `tessera/portfolio/` — positions & accounting
 | File | Owns | Status |
 |------|------|--------|
-| `book.py` | `Book` (cash, positions, realized PnL) + `Position` (qty, avg cost). `apply_fill(symbol, qty, price, cost)` applies fills one at a time (average cost), splits a zero-crossing fill into close+open, expenses fees to realized. | **done** |
-| `accounting.py` | Pure functions over a `Book` + latest `prices`: `market_value`, `equity`, `unrealized_pnl`. Never mutates the book; marks at last observed price. | **done** |
+| `book.py` | `Book` (cash, positions, realized PnL, **`max_leverage`** cap) + `Position` (qty, avg cost). `apply_fill(symbol, qty, price, cost)` applies fills one at a time (average cost), splits a zero-crossing fill into close+open, expenses fees to realized. The book stores the leverage cap but does not enforce it — the engine does, via `accounting.admits_fill` (D43). | **done** |
+| `accounting.py` | Pure functions over a `Book` + latest `prices`: `market_value`, `equity`, `unrealized_pnl`, and **`admits_fill`** (whether a fill keeps gross exposure within `max_leverage × equity`, with a de-risking carve-out; look-ahead-safe marks). Never mutates the book; marks at last observed price. | **done** |
 
 ### `tessera/strategy/` — user strategy surface
 | File | Owns | Status |
@@ -145,8 +155,8 @@ As tasks land, entries move from stub → a real description of behavior.
 | File | Owns | Status |
 |------|------|--------|
 | `config.py` | `RunConfig` (frozen, seam-7 fields) + `to_dict`/`from_dict` for the manifest. | **done** |
-| `manifest.py` | `write_manifest`/`read_manifest` (config, git commit, data hash, versions, seed, **timestamp convention**, timings) and `verify(run_dir, run_fn)` re-running the config and comparing parquet content. `verify` raises **`ConventionMismatch`** when a run's stored timestamp convention differs from the current code's, rather than silently reproducing a different run (D42). | **done** |
-| `recorder.py` | `ParquetRecorder` (buffer by kind → fills/orders/portfolio.parquet), `NullRecorder`, `MultiRecorder`. (Protocol lives in `core/engine.py`.) | **done** |
+| `manifest.py` | `write_manifest`/`read_manifest` (config, git commit, data hash, versions, seed, **timestamp convention**, **per-kind `record_counts`**, timings) and `verify(run_dir, run_fn)` re-running the config and comparing parquet content. `verify` raises **`ConventionMismatch`** when a run's stored timestamp convention differs from the current code's, rather than silently reproducing a different run (D42). `record_counts` states the reject count affirmatively (D43). | **done** |
+| `recorder.py` | `ParquetRecorder` (buffer by kind → fills/orders/portfolio/**reject**.parquet; `record_counts()` for affirmative provenance), `NullRecorder`, `MultiRecorder`. (Protocol lives in `core/engine.py`.) | **done** |
 | `cli.py` | `tessera run` (RunConfig → run → parquet + manifest), `tessera verify`, and `tessera report` (metrics line + tearsheet PNG). `run_from_config` is the shared reproducible core. `_make_strategy` **injects `config.initial_cash`** into strategies that accept it, so fractional-notional sizing scales with the account. | **done** |
 
 ### `tessera/metrics/` — offline analysis
@@ -161,11 +171,11 @@ As tasks land, entries move from stub → a real description of behavior.
 | `test_no_lookahead.py` | Cheating strategies (peek future / forge cash / mutate positions) all raise; a legit rolling-mean strategy works; Context is an immutable snapshot. **6 tests.** | **done** |
 | `test_determinism.py` | Two identical runs produce an identical record stream (byte-identical files come with Task 7). **2 tests.** | **done** |
 | `test_engine.py` | End-to-end run records fills/orders/portfolio; a bar-0 order fills at bar-1's open; final equity reflects fill + mark. **3 tests.** | **done** |
-| `test_runner.py` | Config round-trip; Null/Multi recorders; ParquetRecorder writes fills/orders/portfolio; manifest write+read; verify passes on identical rerun and fails on divergence; data hash is content-sensitive; **verify reports a `ConventionMismatch` (not a bare False) when a run's timestamp convention differs, and a tripwire pins the convention string to `to_epoch_ns`'s actual mapping (D42).** **9 tests.** | **done** |
+| `test_runner.py` | Config round-trip; Null/Multi recorders; ParquetRecorder writes fills/orders/portfolio; manifest write+read; verify passes on identical rerun and fails on divergence; data hash is content-sensitive; verify reports a `ConventionMismatch` (not a bare False) when a run's timestamp convention differs, and a tripwire pins the convention string to `to_epoch_ns`'s actual mapping (D42); **the manifest records the reject count affirmatively — 0 on a clean run, 1 when the leverage cap trips (D43).** **10 tests.** | **done** |
 | `test_strategies_and_cli.py` | MA-crossover long→flat, reversal down/up trading, CSV loader stamps bars at the 16:00 ET session close (winter + summer, DST-correct), a merged daily bar does not leak ahead of same-day intraday ticks, and `tessera run` produces a verifiable run directory. **5 tests.** | **done** |
 | `test_metrics.py` | Known-value total return + max drawdown, drawdown non-positive, turnover/trade count, Sharpe annualisation, tearsheet writes a PNG, missing-fills handling. **6 tests.** | **done** |
-| `test_audit.py` | Audit regressions: Sharpe hand-value (no √252 bug), fill-qty invariant, final-bar-order dropped, 300-sequence accounting sweep, verify-on-changed-input, no-margin + empty-run limitations. **7 tests.** | **done** |
-| `test_accounting.py` | Cash + mark-to-market = equity through a partial fill, a long→short flip, and a close; fees are a realized drag; short-cover profit; average-cost blend. **4 tests.** | **done** |
+| `test_audit.py` | Audit regressions: Sharpe hand-value (no √252 bug), fill-qty invariant, final-bar-order dropped, 300-sequence accounting sweep, verify-on-changed-input, **the leverage attack rejected long *and* short (D43, replaces the old no-margin limitation test)**, empty-run limitation. **7 tests.** | **done** |
+| `test_accounting.py` | Cash + mark-to-market = equity through a partial fill, a long→short flip, and a close; fees are a realized drag; short-cover profit; average-cost blend; **margin admits within the cap and rejects the 10M long/short beyond it; the de-risking carve-out lets an over-limit (drift-induced) account reduce but not increase exposure (D43).** **6 tests.** | **done** |
 | `test_events_clock.py` | Clock moves forward only (backward raises); identical-ts events order deterministically; events are frozen + slotted. **8 tests.** | **done** |
 | `test_queue.py` | Three sources merge in order; identical ts break by source priority; out-of-order source raises; merge is lazy over infinite sources. **5 tests.** | **done** |
 | `test_fills.py` | Next-open fill (not current close), latency delays fill, symbol matching, bps cost, non-bar events don't fill, one-shot limit crossing. **6 tests.** | **done** |
@@ -299,3 +309,21 @@ As tasks land, entries move from stub → a real description of behavior.
   changing the mapping without bumping the string breaks a test. **A detects; option B (store dates
   in `RunConfig`) cures and is scheduled** for the next `RunConfig` change or intraday bar-splitting.
   61 tests green; ruff + mypy-strict clean.
+- **Task 12 — margin / leverage check (D35 fix).** Explain-first (`portfolio/`+`core/`). The engine
+  now consults a pure `accounting.admits_fill(book, symbol, signed_qty, price, prices, cost)` before
+  applying each fill and **rejects** (drops + records seam-6's `reject`) any that would push gross
+  exposure above `book.max_leverage × equity` (default 1×). Chosen over enforcing inside
+  `Book.apply_fill` (would grow a reject channel + pull marks into the book) and over the fill model
+  (would need a seam-4 change); `apply_fill` and the fill model are untouched. The rule covers shorts
+  (gross exposure, not a cash floor — a short generates cash), marks the traded symbol at its fill
+  price and others at last close (look-ahead-safe), and includes a **de-risking carve-out**: a fill
+  that doesn't increase gross exposure is always admitted, so an account pushed over the cap by
+  mark-to-market drift can reduce and never locks up. Limit lives on `Book` (default 1.0), not
+  `RunConfig`, to avoid tripping the Task-11 option-B trigger. Decision D43. Tests: predicate + the
+  drift-over-limit carve-out (both directions) in `test_accounting.py`; the audit's 10M long/short
+  exploit as a rejection regression in `test_audit.py` (replacing `test_no_margin_check…`). Verified:
+  grid AAPL ma_crossover + reversal @0bps re-run with **zero rejections and byte-identical metrics**.
+  Follow-up: since a clean run writes no `reject.parquet` (ambiguous with a broken recorder), the
+  manifest now records per-kind `record_counts` with `reject` always seeded, so **"0 rejections" is
+  affirmed in provenance, not inferred** (`ParquetRecorder.record_counts()`; tested both ways).
+  64 tests green; ruff + mypy-strict clean. Learn guide: `learn/task12-margin-and-leverage.md`.

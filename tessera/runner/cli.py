@@ -118,8 +118,20 @@ def run_cmd(  # noqa: PLR0913 - a CLI naturally has many flags
     recorder.close()
     elapsed = time.perf_counter() - started
 
+    # Record counts per kind so the manifest states the reject count affirmatively; seed the
+    # canonical kinds so "reject": 0 is always present, not absent (an ambiguous signal).
+    counts = recorder.record_counts()
+    for kind in ("fill", "order", "portfolio", "reject"):
+        counts.setdefault(kind, 0)
+
     inputs = [Path(data_dir) / f"{s}.csv" for s in config.symbols]
-    write_manifest(run_dir, config, input_hash=data_hash(inputs), timings={"wall_seconds": elapsed})
+    write_manifest(
+        run_dir,
+        config,
+        input_hash=data_hash(inputs),
+        timings={"wall_seconds": elapsed},
+        record_counts=counts,
+    )
     typer.echo(str(run_dir))
 
 

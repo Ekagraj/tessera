@@ -90,9 +90,14 @@ def write_manifest(
     *,
     input_hash: str,
     timings: dict[str, float],
+    record_counts: dict[str, int] | None = None,
 ) -> None:
-    """Write manifest.json into `run_dir`."""
-    manifest = {
+    """Write manifest.json into `run_dir`.
+
+    `record_counts` (records emitted per kind) is stored so a run affirmatively states its
+    reject count — "0 rejections" is recorded, not left ambiguous with a missing file.
+    """
+    manifest: dict[str, Any] = {
         "config": config.to_dict(),
         "git_commit": git_commit(),
         "data_hash": input_hash,
@@ -101,6 +106,8 @@ def write_manifest(
         "versions": library_versions(),
         "timings": timings,
     }
+    if record_counts is not None:
+        manifest["record_counts"] = record_counts
     text = json.dumps(manifest, indent=2, sort_keys=True)
     Path(run_dir, MANIFEST_NAME).write_text(text)
 

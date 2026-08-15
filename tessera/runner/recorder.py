@@ -64,6 +64,12 @@ class ParquetRecorder:
     def record(self, kind: str, payload: dict[str, Any]) -> None:
         self._buffers.setdefault(kind, []).append(dict(payload))
 
+    def record_counts(self) -> dict[str, int]:
+        """How many records of each kind were seen. Lets the manifest state a run's
+        reject count affirmatively, so "0 rejections" is recorded, not inferred from a
+        missing reject.parquet (which is ambiguous with a broken recorder)."""
+        return {kind: len(rows) for kind, rows in self._buffers.items()}
+
     def close(self) -> None:
         for kind, rows in self._buffers.items():
             filename = _FILENAMES.get(kind, f"{kind}.parquet")

@@ -185,6 +185,44 @@ def test_timestamp_convention_pins_loader_behavior() -> None:
     assert to_epoch_ns("2020-01-02") == expected
 
 
+class _BuyHuge:
+    """Emits one over-leveraged order on the first bar (10M notional on 100k) -> rejected."""
+
+    def on_event(self, event: Event, ctx: Any) -> list[Any]:
+        from tessera.strategy.base import Order
+
+        if event.ts == 0:
+            return [Order(event.symbol, +1, 1_000_000.0, "market")]
+        return []
+
+
+def test_manifest_records_reject_count_affirmatively(tmp_path: Path) -> None:
+    # A clean run has zero rejections, but the manifest must SAY reject: 0, so it is affirmed
+    # in provenance rather than inferred from a missing reject.parquet (ambiguous with a
+    # broken recorder). D43 follow-up.
+    clean = tmp_path / "clean"
+    rec = ParquetRecorder(clean)
+    _do_run(_config(), rec)
+    rec.close()
+    counts = rec.record_counts()
+    for k in ("fill", "order", "portfolio", "reject"):
+        counts.setdefault(k, 0)
+    write_manifest(
+        clean, _config(), input_hash="x", timings={"wall_seconds": 0.0}, record_counts=counts
+    )
+    manifest = read_manifest(clean)
+    assert manifest["record_counts"]["reject"] == 0  # present and zero, not absent
+    assert manifest["record_counts"]["fill"] > 0
+
+    # A run that trips the leverage cap increments the count — proving reject: 0 above is real.
+    busted = tmp_path / "busted"
+    rec2 = ParquetRecorder(busted)
+    run(_bars(), _BuyHuge(), NaiveFillModel(BpsCostModel(0.0)), Book(100_000.0), rec2)
+    rec2.close()
+    assert rec2.record_counts().get("reject", 0) == 1
+    assert rec2.record_counts().get("fill", 0) == 0
+
+
 def test_data_hash_is_stable_and_content_sensitive(tmp_path: Path) -> None:
     a = tmp_path / "a.csv"
     a.write_text("date,close\n2020-01-01,10\n")

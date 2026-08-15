@@ -41,26 +41,30 @@ the source of truth for *how we work*.
 
 ## Current state (update this after each task)
 
-- **Done:** Tasks 0–9 + audit, **Task 10 Parts 1–2**, and **Task 11**. Full pipeline works from
-  the CLI: `tessera run` → run dir, `tessera verify` → OK, `tessera report` → metrics + tearsheet.
-  `data/` now holds **real split/dividend-adjusted Stooq bars** (six tickers, 2005–2026),
+- **Done:** Tasks 0–9 + audit, **Task 10 Parts 1–2**, **Task 11**, and **Task 12**. Full pipeline
+  works from the CLI: `tessera run` → run dir, `tessera verify` → OK, `tessera report` → metrics +
+  tearsheet. `data/` now holds **real split/dividend-adjusted Stooq bars** (six tickers, 2005–2026),
   validated + all gates pass. Both strategies size by **fixed-fractional notional**. Daily bars are
   stamped at their **16:00 ET session close** (D41), closing the D32 midnight-bar leak; the manifest
   **versions that convention** so `verify` raises a loud `ConventionMismatch` on a mismatch (D42).
+  The engine now enforces a **gross-leverage cap** (default 1×) — closing D35's unlimited-leverage
+  hole — rejecting over-cap fills and emitting seam-6's `reject` record (D43).
 - **Scheduled work (don't lose it):** **Task 11 option B** — store *calendar dates* (not raw ns) in
   `RunConfig` so a boundary is convention-stable. D42's guard *detects* the reproducibility break; B
   *cures* it. **Trigger: the next time `RunConfig` is modified, or when intraday bar-splitting lands,
   whichever comes first.** It's a seam-7 change (flag it). See D42 + PROGRESS "Deferred / scheduled".
-- **Next:** **Task 12** (new, to be specified by the user), *then* **Task 10 Part 3** — the README
-  write-up (what it is, mermaid diagram, nine seams one-liners, how to run, results framed around
-  transaction-cost sensitivity). Part 3 was intentionally reordered to after 11–12 so it reflects
-  what those add. Confirmed README material is being staged in `docs/README_NOTES.md` as work
-  lands. Then the end-of-week "interview me" prompt.
-- **Git:** local repo, no remote. Committed through the audit **and Task 10 Parts 1–2**. Task 11 is
-  **not yet committed** (commit only when asked). Raw source CSVs live in `Stooq_csv/` (gitignored,
-  like `data/`); the six installed series in `data/` are also gitignored.
-- **Total tests passing:** 61 (Task 11: a merge/leak test + strengthened loader test; D42 added a
-  convention-mismatch test and a convention-string tripwire). ruff + mypy-strict clean.
+- **Next:** **Task 10 Part 3** — the README write-up (what it is, mermaid diagram, nine seams
+  one-liners, how to run, results framed around transaction-cost sensitivity). It was intentionally
+  reordered to after Tasks 11–12 so it reflects what those add (both now done). Confirmed README
+  material is being staged in `docs/README_NOTES.md` as work lands. Then the end-of-week "interview
+  me" prompt.
+- **Git:** local repo, no remote. Committed through **Task 11** (two commits: a `.gitignore`
+  anchoring fix that first tracked the previously-ignored `tessera/data/` package, then Task 11).
+  **Task 12 is not yet committed** (commit only when asked). Raw source CSVs live in `Stooq_csv/`
+  (gitignored, like `data/`); the six installed series in `data/` are also gitignored.
+- **Total tests passing:** 64 (Task 12 added 3: the margin predicate + drift-over-limit carve-out in
+  `test_accounting.py`, the leverage-attack regression replacing the old no-margin test in
+  `test_audit.py`, and the affirmative reject-count test in `test_runner.py`). ruff + mypy-strict clean.
 
 ---
 

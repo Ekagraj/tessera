@@ -567,3 +567,51 @@ seam-7 schema change with a back-compat migration, so it is scheduled for the ne
 deferral is a deliberate decision, not an omission. Revisit A itself only if the convention
 identifier ever needs to encode more than the date→ns rule (e.g. a calendar or half-day policy),
 at which point it should become a small structured version block rather than one string.
+
+---
+
+## Task 12: the margin / leverage check (D35 fix)
+
+**Raw material — rewrite in your own words.**
+
+### D43. A gross-leverage cap (default 1x) enforced by the engine, rejected fills recorded as `reject`
+Decided: the engine now refuses a fill that would push **gross exposure above `max_leverage x
+equity`** (default `max_leverage = 1.0`, i.e. no leverage), dropping the whole order and emitting
+a `reject` record instead of applying it. This closes D35 — the only real return-inflation vector
+the audit found: a strategy could buy 10M of notional on a 100k account, taking cash to −9.9M with
+no rejection and a 10x return amplification at no financing cost. Three sub-decisions:
+(1) **Where** — a pure predicate `accounting.admits_fill(book, symbol, signed_qty, price, prices,
+cost)`, evaluated by the *engine* between producing a fill and applying it (chosen over putting it
+in `Book.apply_fill`, which would grow a reject channel and drag mark prices into the book, and
+over the fill model, which would need a seam-4 protocol change to see cash/equity). `apply_fill`
+stays a pure mutation; the fill model is untouched; the engine owns the `reject` record (seam 6's
+first use of that kind — `ParquetRecorder` already writes any kind to `<kind>.parquet`).
+(2) **What happens** — the order is *dropped whole* and recorded as `reject`, not partially filled
+to an affordable size (partial fills silently change the requested quantity, break the reversal
+zero-crossing flip, and are broker-realism scope creep; deferred).
+(3) **The rule** — gross exposure `G = Σ|qty x mark|` must satisfy `G ≤ max_leverage x equity`,
+which covers **shorts** (a cash-non-negative rule alone would not: a short *generates* cash, so
+unbounded shorting is unbounded leverage). Marks are look-ahead-safe: the traded symbol at its
+fill price, others at last observed close (the engine's `prices`, which at fill time still holds
+prior marks). A **de-risking carve-out** always admits a fill that does not increase gross
+exposure, so an account pushed over the cap by mark-to-market drift (only reachable that way — no
+fill can create an over-cap state) can still reduce and never locks up; a locked account would be
+a worse failure than the bug. The limit lives as a `Book` field defaulting to 1.0, **not** wired
+to `RunConfig`, to keep this change inside `portfolio/`+`core/` and avoid tripping the Task-11
+option-B trigger (a `RunConfig` edit); making it configurable is a small follow-up that should be
+paired with option B when `RunConfig` is next opened. Grid impact: fixed-fractional 10%-of-100k
+sizing never approaches 1x, so as expected **zero rejections and byte-identical metrics** on the
+re-run AAPL rows (ma_crossover + reversal, 0 bps). Revisit if a strategy legitimately needs >1x
+(raise `max_leverage`), if per-symbol or maintenance-margin rules are needed, or if partial fills
+to the affordable size become worth the complexity.
+
+**Affirmative reject count (follow-up).** A run with zero rejections writes no `reject.parquet`,
+which is *ambiguous*: it looks identical to a run where reject recording silently broke. So the
+manifest now stores `record_counts` (records emitted per kind, e.g. `{"fill": 5016, "order": 5017,
+"portfolio": 5033, "reject": 0}`) with the canonical kinds — including `reject` — always seeded,
+so **"0 rejections" is stated in provenance, not inferred from a missing file.** Chosen over always
+writing an empty `reject.parquet`, which would invent a zero-row-schema convention no other record
+kind follows (fills/orders/portfolio are likewise only written when non-empty); the manifest is the
+artifact whose job is to *describe* the run, so an affirmative count belongs there. Honest boundary:
+the count affirms what the *recorder* received; it is the D43 attack test that proves the *engine*
+emits a reject when it should. Together they cover "did it reject?" from both ends.
