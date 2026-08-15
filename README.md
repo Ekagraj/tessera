@@ -63,8 +63,10 @@ flowchart LR
   `max_leverage × equity` (default 1×) — covering shorts, not just cash — and records the rejection.
 - **Reproducibility you can check.** Each run writes a `manifest.json` (config, git commit, data
   content hash, timestamp convention, per-kind record counts). `tessera verify <run>` re-runs the
-  config and confirms byte-identical output, and refuses — loudly — to compare across a timestamp
-  convention change rather than silently producing a different result.
+  config and confirms the **record content matches** — parquet rows compared with
+  `DataFrame.equals`, not raw bytes, because correct parquet files can differ in incidental metadata
+  (writer version, compression framing) while holding identical rows — and refuses — loudly — to
+  compare across a timestamp convention change rather than silently producing a different result.
 
 ## Install & run
 
@@ -83,8 +85,14 @@ tessera report runs/<the-printed-path>
 tessera verify runs/<the-printed-path>
 ```
 
-Strategies: `ma_crossover` (`fast`,`slow`) and `reversal`. Data: split/dividend-adjusted Stooq
-daily bars for AAPL, MSFT, JPM, XOM, KO, NVDA (2005–2026) live in `data/` (gitignored).
+Strategies: `ma_crossover` (`fast`,`slow`) and `reversal`.
+
+**Data.** The six daily-bar CSVs used above are committed under `data/`, so a fresh clone runs
+without any download. Source: [Stooq](https://stooq.com) US daily bars, fetched 2026-08-12, for
+AAPL, MSFT, JPM, XOM, KO, and NVDA, covering 2005-01-03 … 2026-08-11. They are **split- and
+dividend-adjusted** (verified: NVDA's 4-for-1 (2021) and 10-for-1 (2024) splits appear as no price
+move, and no single-day return across the six series falls near a split signature). `runs/` output
+stays local (gitignored).
 
 ## Results: a transaction-cost experiment
 
@@ -115,6 +123,10 @@ run of the shipped code (24 runs, **0 rejections**).
 | XOM  | 31.14% |  5.53% | −25.6 pp | 0.62 | 0.12 | 477x | 5010 |
 | KO   |  8.35% | **−16.90%** | −25.3 pp | 0.23 | −0.44 | 537x | 4973 |
 | NVDA | 54.89% | 29.00% | −25.9 pp | 0.56 | 0.31 | 473x | 4994 |
+
+![AAPL ma_crossover tearsheet](docs/images/aapl_ma_crossover.png)
+
+*Tearsheet for AAPL `ma_crossover` (10/50) at 5 bps, produced by `tessera report`: equity curve, underwater drawdown, rolling 60-period Sharpe, and return distribution — the flat stretches in the equity curve are the strategy sitting out of the market (see limitations).*
 
 ### What the experiment shows
 
@@ -149,8 +161,23 @@ no look-ahead, deterministic replay, and `cash + mark-to-market == equity` at ev
 
 ## Honest limitations
 
-Week-1 scope, deliberately not built speculatively: fills are naive (next open, fixed bps cost, no
-slippage or market impact); data is daily bars only (no intraday, no order-book replay); half-day
+**These make the tables above an upper bound, not a forecast:**
+
+- **Survivorship bias — the results are inflated, and every Sharpe is an upper bound.** All six
+  tickers were chosen because they are liquid large caps *today*. In 2005 nobody could have known
+  NVDA would become NVDA, and the universe contains nothing that was delisted, acquired, or went to
+  zero over the twenty years. Selecting the winners after the fact lifts every return and Sharpe in
+  both tables; a survivorship-free universe (including the failures) would score lower. Read the
+  numbers as an optimistic ceiling on what these strategies could have done, not an estimate of what
+  they would have done.
+- **The momentum strategy dodged 2008, it did not survive it.** `ma_crossover` held an AAPL position
+  on only **34.8% of 2008 trading days** (88 of 253) — it was flat for the rest, sitting out most of
+  the crash. That is why its twenty-year max drawdown is a mild **−4.16%**. "20 years including the
+  financial crisis" should not be read as evidence of robustness *through* the crisis: the strategy
+  mostly avoided being invested during it, rather than weathering it.
+
+**Week-1 scope, deliberately not built speculatively:** fills are naive (next open, fixed bps cost,
+no slippage or market impact); data is daily bars only (no intraday, no order-book replay); half-day
 early closes are not modeled by a market calendar; there is no walk-forward or purged
 cross-validation yet. Each is a scheduled addition behind a seam, not a rewrite.
 

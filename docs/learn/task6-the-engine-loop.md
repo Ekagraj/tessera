@@ -160,7 +160,7 @@ One file, plus two tests (two of the three load-bearing tests are now live).
 - **`tests/test_engine.py`** — an end-to-end run records fills/orders/portfolio, and an
   order decided on bar 0 fills at bar 1's open (proving no same-bar fill).
 - **`tests/test_determinism.py`** — two identical runs produce an identical record
-  stream (Task 7 will make it byte-identical files).
+  stream (Task 7's `verify` compares parquet **content**, not raw bytes — see D33).
 
 ---
 

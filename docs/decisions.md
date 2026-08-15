@@ -600,7 +600,7 @@ a worse failure than the bug. The limit lives as a `Book` field defaulting to 1.
 to `RunConfig`, to keep this change inside `portfolio/`+`core/` and avoid tripping the Task-11
 option-B trigger (a `RunConfig` edit); making it configurable is a small follow-up that should be
 paired with option B when `RunConfig` is next opened. Grid impact: fixed-fractional 10%-of-100k
-sizing never approaches 1x, so as expected **zero rejections and byte-identical metrics** on the
+sizing never approaches 1x, so as expected **zero rejections and identical metrics** on the
 re-run AAPL rows (ma_crossover + reversal, 0 bps). Revisit if a strategy legitimately needs >1x
 (raise `max_leverage`), if per-symbol or maintenance-margin rules are needed, or if partial fills
 to the affordable size become worth the complexity.

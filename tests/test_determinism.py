@@ -1,8 +1,10 @@
 """Same config and seed run twice must produce identical records.
 
 This is one of the three load-bearing tests. At the engine level it asserts that two
-runs with identical inputs produce a byte-identical record *stream* (Task 7 will
-strengthen this to byte-identical files on disk via the parquet recorder).
+runs with identical inputs produce an identical record *stream*. Task 7's `verify`
+checks on-disk reproducibility by comparing parquet **content** (`DataFrame.equals`),
+not raw bytes: correct parquet files can differ in incidental metadata while holding
+identical rows (see decisions.md D33).
 """
 
 from __future__ import annotations

@@ -212,8 +212,8 @@ sorting structure. Then:
 
 - **Your saved results stop matching themselves.** Run the identical backtest twice
   and the two simultaneous trades process in different orders → the strategy takes
-  slightly different actions → the recorded fills differ → the files are no longer
-  byte-identical. The promise "same inputs give same outputs" is now false.
+  slightly different actions → the recorded fills differ → the two runs no longer
+  match. The promise "same inputs give same outputs" is now false.
 - **Your profit number quietly drifts.** If one of those two trades nudges the
   strategy (fills its position, trips a signal) before the other, your final P&L
   and Sharpe come out slightly different each run. Nothing *looks* broken — it just

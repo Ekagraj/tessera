@@ -83,7 +83,7 @@ gross exposure above `max_leverage × equity` (default 1×), dropping the order 
 `reject` record (its first use). The rule covers **shorts** (a cash floor alone wouldn't), marks
 look-ahead-safe, and always permits **de-risking** so a drift-over-limit account never locks up. The
 audit's 10M-notional exploit (long and short) is now a passing regression test. Grid: zero rejections,
-byte-identical metrics. The manifest also records per-kind `record_counts`, so a run states its reject
+identical metrics. The manifest also records per-kind `record_counts`, so a run states its reject
 count (0 or N) affirmatively rather than by the absence of a file. 64 tests green; ruff + mypy-strict clean.
 
 **Deferred / scheduled — Task 11 option B (the *cure* for the boundary reinterpretation).** D42's
@@ -170,7 +170,7 @@ As tasks land, entries move from stub → a real description of behavior.
 | File | Asserts | Status |
 |------|---------|--------|
 | `test_no_lookahead.py` | Cheating strategies (peek future / forge cash / mutate positions) all raise; a legit rolling-mean strategy works; Context is an immutable snapshot. **6 tests.** | **done** |
-| `test_determinism.py` | Two identical runs produce an identical record stream (byte-identical files come with Task 7). **2 tests.** | **done** |
+| `test_determinism.py` | Two identical runs produce an identical record stream; Task 7's `verify` compares parquet **content**, not raw bytes (D33). **2 tests.** | **done** |
 | `test_engine.py` | End-to-end run records fills/orders/portfolio; a bar-0 order fills at bar-1's open; final equity reflects fill + mark. **3 tests.** | **done** |
 | `test_runner.py` | Config round-trip; Null/Multi recorders; ParquetRecorder writes fills/orders/portfolio; manifest write+read; verify passes on identical rerun and fails on divergence; data hash is content-sensitive; verify reports a `ConventionMismatch` (not a bare False) when a run's timestamp convention differs, and a tripwire pins the convention string to `to_epoch_ns`'s actual mapping (D42); **the manifest records the reject count affirmatively — 0 on a clean run, 1 when the leverage cap trips (D43).** **10 tests.** | **done** |
 | `test_strategies_and_cli.py` | MA-crossover long→flat, reversal down/up trading, CSV loader stamps bars at the 16:00 ET session close (winter + summer, DST-correct), a merged daily bar does not leak ahead of same-day intraday ticks, and `tessera run` produces a verifiable run directory. **5 tests.** | **done** |
@@ -324,7 +324,7 @@ As tasks land, entries move from stub → a real description of behavior.
   `RunConfig`, to avoid tripping the Task-11 option-B trigger. Decision D43. Tests: predicate + the
   drift-over-limit carve-out (both directions) in `test_accounting.py`; the audit's 10M long/short
   exploit as a rejection regression in `test_audit.py` (replacing `test_no_margin_check…`). Verified:
-  grid AAPL ma_crossover + reversal @0bps re-run with **zero rejections and byte-identical metrics**.
+  grid AAPL ma_crossover + reversal @0bps re-run with **zero rejections and identical metrics**.
   Follow-up: since a clean run writes no `reject.parquet` (ambiguous with a broken recorder), the
   manifest now records per-kind `record_counts` with `reject` always seeded, so **"0 rejections" is
   affirmed in provenance, not inferred** (`ParquetRecorder.record_counts()`; tested both ways).

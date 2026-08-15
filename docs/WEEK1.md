@@ -211,7 +211,8 @@ The centerpiece. This is what interviewers will ask about.
 > Do not write code until I confirm the ordering.
 
 **Acceptance:** end to end run completes on synthetic data. `test_determinism.py`
-passes: same config and seed, byte-identical output.
+passes: same config and seed, identical record content (compared as parquet rows,
+not raw bytes — see decisions.md D33).
 
 **You must be able to answer:**
 - Recite the iteration order and justify each position.

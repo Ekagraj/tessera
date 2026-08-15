@@ -193,7 +193,7 @@ Cover the text and try these.
 
 5. **Adding the check changed nothing in the Task 10 grid. Why is that expected, not suspicious?**
    (Part 4 / Part 0. Fixed-fractional sizing targets 10% of the account, so gross exposure ≈ 0.1× —
-   nowhere near the 1× cap. Zero rejections, so byte-identical metrics. A row that *changed* would
+   nowhere near the 1× cap. Zero rejections, so identical metrics. A row that *changed* would
    be the finding.)
 
 If those come out cleanly in your own words, you've got Task 12 cold.

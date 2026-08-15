@@ -1,9 +1,9 @@
-# Run output directories and raw/processed data (root-anchored: a leading slash
-# keeps these to the repo root so they do NOT also match the source package
-# tessera/data/, which must be tracked).
-# (Stooq_csv/ holds the raw downloaded source CSVs, kept local like data/)
+# Run output directories (root-anchored: a leading slash keeps these to the repo
+# root so they do NOT also match the source package tessera/data/, which must be
+# tracked). The six processed daily-bar CSVs in /data/ are committed so a fresh
+# clone can run immediately; /runs/ output stays local.
+# (Stooq_csv/ holds the raw downloaded source CSVs, kept local.)
 /runs/
-/data/
 /Stooq_csv/
 
 # Python
