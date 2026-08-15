@@ -342,3 +342,25 @@ As tasks land, entries move from stub → a real description of behavior.
   prior close can read >1× gross at the next-open fill on a gap-up day (AAPL/XOM/NVDA), so the
   buy-and-hold validation relaxes the Task-12 cap (an entry-timing artifact, cap tested elsewhere).
   67 tests green; ruff + mypy-strict clean.
+- **Task 10 Part 3 prep — canonical grid rerun + fabrication audit.** Ahead of writing the README,
+  reran the **full 24-row grid** (ma_crossover + reversal × six symbols × {0,5} bps) on final code
+  (Tasks 0–12 + validation), 2005-01-03…2024-12-31 — so every README number traces to one run.
+  **0 rejects across all 24.** Clean transaction-cost story: ma_crossover is cost-insensitive
+  (≤0.75pp drag at 5 bps, positive on all six), reversal is cost-sensitive (~25pp drag, AAPL/MSFT/KO
+  flip negative). Canonical table staged in `README_NOTES.md`. Also audited the remaining task docs
+  for fabricated figures (rule 8): re-derived the turnover decomposition, underlying vols, and the
+  AAPL sizing table on final code — **all match**; the only ever-found fabrication (Task-9 `vol
+  22.1%`) was already fixed in the audit. Now writing `README.md` (Task 10 Part 3).
+- **Numeric-fabrication sweep of the learn guides (task1–task11).** Systematically classified every
+  numeric figure as (a) copied from program output, (b) hand-computable/verified, or (c) written from
+  expectation — recomputing every (b) rather than eyeballing. **No (c) fabrications found**; all
+  worked-example arithmetic (tasks 1,3,4,5,6,9) hand-verifies and matches the tests, and all task10
+  result numbers (turnover 455.94x/22.8×yr, vols 18–48%, sizing 0.095/2.4/18.4%, flip split
+  2515/99.26%/$20,035 · 2500/0.72%/$146 · open 0.02%, 1.45× spread, 63.6%≈64% pre-2015 share) and
+  task11 figures (DST 21:00/20:00, 5032 vs 5033) reproduce exactly. Two items flagged, both
+  documented not fixed: (1) `task9:148` `tessera report` line shows total −16.12% / maxDD −16.13%
+  vs the audit's stated-real −16.11% / −16.11% (0.01–0.02pp, unreconcilable — the synthetic
+  sine-wave input was replaced in Task 10, so the run can't be re-derived); (2) four historical
+  old-100-share figures in `task10` (vol 0.48–3.75%, 9.1× spread, 12% pre-2015, −0.34%) describe
+  superseded code and would need a pre-fix checkout to re-verify. The one prior fabrication (Task-9
+  `vol 22.1%`) was already caught/fixed in the audit and the fix is itself internally consistent.
