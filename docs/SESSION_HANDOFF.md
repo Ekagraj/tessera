@@ -160,11 +160,13 @@ This is the loop this session has followed. Reproduce it exactly.
 - Git identity is already configured (`Ekagra <ekagraj2003@gmail.com>`).
 - One logical commit per task is fine (Task 0 and Task 1 were split into two initial
   commits because the first commit necessarily included the scaffold).
-- Commit message: a short imperative title like `Task N: <thing>`, a body explaining
-  what and why, and **always** end with the trailer:
-  ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
-  ```
+- Commit message: a short imperative title like `Task N: <thing>` and a body explaining
+  what and why.
+- **Do NOT add a `Co-Authored-By: Claude ...` trailer.** The user does not want Claude
+  listed as a contributor. A local `commit-msg` hook (`.git/hooks/commit-msg`) strips any
+  such line automatically on every commit as a backstop — but do not add it in the first
+  place. (Note: `.git/hooks/` is not cloned, so if the repo is re-created, reinstall the
+  hook.)
 - Before committing, sanity-check that `.venv/`, `runs/`, `data/`, `.DS_Store` are
   ignored (they are) and that `git status` is otherwise as expected.
 
